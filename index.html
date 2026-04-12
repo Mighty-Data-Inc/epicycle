@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Epicycle Demo</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #111;
+      color: #ddd;
+      font-family: system-ui, sans-serif;
+      display: flex;
+      flex-direction: column;
+      height: 100dvh;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    header {
+      padding: 8px 16px;
+      text-align: center;
+      font-size: 1rem;
+      letter-spacing: 0.06em;
+      color: #88bbdd;
+      background: #0d1117;
+      flex-shrink: 0;
+    }
+
+    #canvas-wrap {
+      flex: 1;
+      overflow: hidden;
+      position: relative;
+      min-height: 0;
+    }
+
+    canvas {
+      display: block;
+    }
+
+    #controls {
+      background: #0d1117;
+      border-top: 1px solid #222;
+      padding: 10px 20px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 20px;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .ctrl {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+    }
+
+    .ctrl label {
+      font-size: 0.8rem;
+      color: #99aacc;
+    }
+
+    .ctrl input[type=range] {
+      width: 200px;
+      cursor: pointer;
+      accent-color: #4488cc;
+    }
+
+    .ctrl .val {
+      font-size: 0.8rem;
+      color: #ccddff;
+      font-variant-numeric: tabular-nums;
+      min-width: 4em;
+      text-align: center;
+    }
+
+    button {
+      padding: 6px 16px;
+      background: #1e2d3d;
+      border: 1px solid #2e4d6d;
+      border-radius: 4px;
+      color: #cce;
+      cursor: pointer;
+      font-size: 0.8rem;
+      transition: background 0.15s;
+    }
+
+    button:hover { background: #2a3f55; }
+  </style>
+</head>
+<body>
+
+<header>Epicycle Demo</header>
+
+<div id="canvas-wrap">
+  <canvas id="canvas"></canvas>
+</div>
+
+<div id="controls">
+  <div class="ctrl">
+    <label for="sliderRadius">Secondary radius</label>
+    <input type="range" id="sliderRadius" min="0" max="1" step="0.01" value="0.5">
+    <span class="val" id="valRadius">0.50</span>
+  </div>
+  <div class="ctrl">
+    <label for="sliderRate">Secondary rate</label>
+    <input type="range" id="sliderRate" min="-5" max="5" step="0.1" value="2">
+    <span class="val" id="valRate">2.0×</span>
+  </div>
+  <div class="ctrl">
+    <button id="btnClear">Clear Trail</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  const canvas       = document.getElementById('canvas');
+  const ctx          = canvas.getContext('2d');
+  const wrap         = document.getElementById('canvas-wrap');
+  const sliderRadius = document.getElementById('sliderRadius');
+  const sliderRate   = document.getElementById('sliderRate');
+  const valRadius    = document.getElementById('valRadius');
+  const valRate      = document.getElementById('valRate');
+  const btnClear     = document.getElementById('btnClear');
+
+  // ── parameters ──────────────────────────────────────────────────────────
+  /** Seconds for one full clockwise revolution of the primary circle. */
+  const PRIMARY_PERIOD = 10;
+
+  /** Secondary radius as a fraction of the primary radius (0–1). */
+  let p2radius = parseFloat(sliderRadius.value);
+
+  /** Secondary angular rate relative to the primary rate (can be negative). */
+  let p2rate = parseFloat(sliderRate.value);
+
+  // ── trail ────────────────────────────────────────────────────────────────
+  /** Positions of the red dot in canvas-centred coordinates. */
+  let trail = [];
+  const TRAIL_MAX = 6000;
+
+  // ── animation state ──────────────────────────────────────────────────────
+  let startTime = null;
+
+  // ── helpers ───────────────────────────────────────────────────────────────
+  function resizeCanvas() {
+    canvas.width  = wrap.clientWidth;
+    canvas.height = wrap.clientHeight;
+  }
+
+  function clearTrail() { trail = []; }
+
+  // ── controls ──────────────────────────────────────────────────────────────
+  sliderRadius.addEventListener('input', function () {
+    p2radius = parseFloat(this.value);
+    valRadius.textContent = p2radius.toFixed(2);
+    clearTrail();
+  });
+
+  sliderRate.addEventListener('input', function () {
+    p2rate = parseFloat(this.value);
+    valRate.textContent = p2rate.toFixed(1) + '\u00d7';
+    clearTrail();
+  });
+
+  btnClear.addEventListener('click', clearTrail);
+
+  window.addEventListener('resize', function () {
+    resizeCanvas();
+    clearTrail();
+  });
+
+  resizeCanvas();
+
+  // ── draw loop ──────────────────────────────────────────────────────────────
+  function draw(timestamp) {
+    if (startTime === null) startTime = timestamp;
+    var t  = (timestamp - startTime) / 1000; // elapsed seconds
+    var W  = canvas.width;
+    var H  = canvas.height;
+    var R1 = Math.min(W, H) * 0.35;          // primary radius in px
+    var R2 = R1 * p2radius;                  // secondary radius in px
+
+    // Angles — clockwise rotation ⟹ angle increases with time in canvas
+    // coordinates (y-axis points down).
+    var theta1 = (2 * Math.PI * t) / PRIMARY_PERIOD;
+    var theta2 = (2 * Math.PI * t * p2rate) / PRIMARY_PERIOD;
+
+    // Blue dot: on primary circle, offset from canvas centre
+    var bx = R1 * Math.cos(theta1);
+    var by = R1 * Math.sin(theta1);
+
+    // Red dot: on secondary circle
+    var rx = bx + R2 * Math.cos(theta2);
+    var ry = by + R2 * Math.sin(theta2);
+
+    // Accumulate trail when the secondary circle has non-zero size
+    if (R2 > 0) {
+      trail.push({ x: rx, y: ry });
+      if (trail.length > TRAIL_MAX) {
+        trail.splice(0, trail.length - TRAIL_MAX);
+      }
+    }
+
+    // ── render ──────────────────────────────────────────────────────────────
+    ctx.clearRect(0, 0, W, H);
+    ctx.save();
+    ctx.translate(W / 2, H / 2);
+
+    // Trail — drawn in batches so older segments are more transparent
+    if (trail.length > 1) {
+      var n        = trail.length;
+      var BATCHES  = 8;
+      var batchLen = Math.ceil(n / BATCHES);
+      ctx.lineWidth = 1.5;
+      for (var b = 0; b < BATCHES; b++) {
+        var alpha = ((b + 1) / BATCHES) * 0.85;
+        var s = b * batchLen;
+        if (s >= n) break;
+        var e = Math.min(s + batchLen + 1, n);
+        ctx.beginPath();
+        ctx.moveTo(trail[s].x, trail[s].y);
+        for (var i = s + 1; i < e; i++) {
+          ctx.lineTo(trail[i].x, trail[i].y);
+        }
+        ctx.strokeStyle = 'rgba(220, 60, 60, ' + alpha + ')';
+        ctx.stroke();
+      }
+    }
+
+    // Primary circle (grey circumference, not filled)
+    ctx.beginPath();
+    ctx.arc(0, 0, R1, 0, 2 * Math.PI);
+    ctx.strokeStyle = '#555';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Arm from centre to blue dot
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(bx, by);
+    ctx.strokeStyle = 'rgba(80, 160, 255, 0.35)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    if (R2 > 0) {
+      // Secondary circle (grey circumference, not filled)
+      ctx.beginPath();
+      ctx.arc(bx, by, R2, 0, 2 * Math.PI);
+      ctx.strokeStyle = '#555';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // Arm from blue dot to red dot
+      ctx.beginPath();
+      ctx.moveTo(bx, by);
+      ctx.lineTo(rx, ry);
+      ctx.strokeStyle = 'rgba(255, 90, 90, 0.35)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // Red dot
+      ctx.beginPath();
+      ctx.arc(rx, ry, 6, 0, 2 * Math.PI);
+      ctx.fillStyle = '#ff3333';
+      ctx.fill();
+    }
+
+    // Blue dot (drawn after secondary circle so it renders on top)
+    ctx.beginPath();
+    ctx.arc(bx, by, 6, 0, 2 * Math.PI);
+    ctx.fillStyle = '#22aaff';
+    ctx.fill();
+
+    // Small reference dot at the canvas centre
+    ctx.beginPath();
+    ctx.arc(0, 0, 3, 0, 2 * Math.PI);
+    ctx.fillStyle = '#666';
+    ctx.fill();
+
+    ctx.restore();
+
+    requestAnimationFrame(draw);
+  }
+
+  requestAnimationFrame(draw);
+}());
+</script>
+
+</body>
+</html>
