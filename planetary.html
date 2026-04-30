@@ -198,6 +198,20 @@
   const controls     = document.getElementById('controls');
   const valDrive     = document.getElementById('valDrive');
   const valCarrier   = document.getElementById('valCarrier');
+  const gearButtons  = {
+    Solar: {
+      fixed: document.getElementById('btnFixedSolar'),
+      driven: document.getElementById('btnDrivenSolar')
+    },
+    Planetary: {
+      fixed: document.getElementById('btnFixedPlanetary'),
+      driven: document.getElementById('btnDrivenPlanetary')
+    },
+    Astral: {
+      fixed: document.getElementById('btnFixedAstral'),
+      driven: document.getElementById('btnDrivenAstral')
+    }
+  };
 
   // ── planetary gear setup (units are geometric units, then scaled to px) ──
   const SUN_DIAMETER = 1;
@@ -220,6 +234,20 @@
     (SUN_DIAMETER + RING_DIAMETER);
   // Planet spin from external mesh with fixed sun (Rs = Rp): wp = 2*wc - ws.
   const OMEGA_PLANET = (2 * OMEGA_CARRIER) - OMEGA_SUN;
+
+  // ── gear state model ──────────────────────────────────────────────────────
+  const GearBinding = Object.freeze({
+    FIXED: 'Fixed',
+    DRIVEN: 'Driven',
+    UNBOUND: 'Unbound'
+  });
+
+  // Initial setup: Solar fixed, Astral driven, Planetary unbound.
+  const gearState = {
+    Solar: GearBinding.FIXED,
+    Planetary: GearBinding.UNBOUND,
+    Astral: GearBinding.DRIVEN
+  };
 
   // ── animation state ──────────────────────────────────────────────────────
   let startTime = null;
@@ -266,13 +294,52 @@
   valDrive.textContent = (OMEGA_RING / (2 * Math.PI)).toFixed(3) + ' rev/s';
   valCarrier.textContent = (OMEGA_CARRIER / (2 * Math.PI)).toFixed(3) + ' rev/s';
 
-  // Set initial active button states: Astral driven, Solar fixed.
-  document.getElementById('btnDrivenAstral').classList.add('active');
-  document.getElementById('btnFixedSolar').classList.add('active');
+  function syncButtonStatesFromGearState() {
+    Object.keys(gearButtons).forEach(function (gearName) {
+      var state = gearState[gearName];
+      var fixedBtn = gearButtons[gearName].fixed;
+      var drivenBtn = gearButtons[gearName].driven;
 
-  // Disable conflicting buttons: can't drive what's fixed, and vice versa.
-  document.getElementById('btnDrivenSolar').disabled = true;
-  document.getElementById('btnFixedAstral').disabled = true;
+      fixedBtn.classList.toggle('active', state === GearBinding.FIXED);
+      drivenBtn.classList.toggle('active', state === GearBinding.DRIVEN);
+
+      fixedBtn.disabled = state === GearBinding.DRIVEN;
+      drivenBtn.disabled = state === GearBinding.FIXED;
+    });
+  }
+
+  function findGearByBinding(binding) {
+    return Object.keys(gearState).find(function (gearName) {
+      return gearState[gearName] === binding;
+    });
+  }
+
+  function handleFixedPress() {
+    var unboundGear = findGearByBinding(GearBinding.UNBOUND);
+    var fixedGear = findGearByBinding(GearBinding.FIXED);
+    if (!unboundGear || !fixedGear) return;
+
+    gearState[fixedGear] = GearBinding.UNBOUND;
+    gearState[unboundGear] = GearBinding.FIXED;
+    syncButtonStatesFromGearState();
+  }
+
+  function handleDrivenPress() {
+    var unboundGear = findGearByBinding(GearBinding.UNBOUND);
+    var drivenGear = findGearByBinding(GearBinding.DRIVEN);
+    if (!unboundGear || !drivenGear) return;
+
+    gearState[drivenGear] = GearBinding.UNBOUND;
+    gearState[unboundGear] = GearBinding.DRIVEN;
+    syncButtonStatesFromGearState();
+  }
+
+  Object.keys(gearButtons).forEach(function (gearName) {
+    gearButtons[gearName].fixed.addEventListener('click', handleFixedPress);
+    gearButtons[gearName].driven.addEventListener('click', handleDrivenPress);
+  });
+
+  syncButtonStatesFromGearState();
 
   window.addEventListener('resize', function () {
     resizeCanvas();
