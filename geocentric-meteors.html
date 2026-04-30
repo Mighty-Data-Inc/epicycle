@@ -331,7 +331,9 @@
     };
   }
 
-  var meteor = newMeteor(angles.grace);
+  var meteors = [newMeteor(angles.grace)];
+  var meteorSpawnTimer = 0;
+  const METEOR_SPAWN_INTERVAL = 6; // seconds
 
   // ── helpers ───────────────────────────────────────────────────────────────
   function resizeCanvas() {
@@ -479,23 +481,34 @@
     var unboundKey = GEAR_OMEGA_KEY[findGearByBinding(GearBinding.UNBOUND)];
     angles.grace   += (omegas[unboundKey] || 0) * dt;
 
-    meteor.angle += meteor.omega * dt;
-
-    if (isInGraceArc(meteor.angle, angles.grace)) {
-      meteor.radius += METEOR_EXPULSION_RATE * dt;
-    } else {
-      meteor.radius -= METEOR_DESCENT_RATE * dt;
+    // Spawn a new meteor every METEOR_SPAWN_INTERVAL seconds.
+    meteorSpawnTimer += dt;
+    if (meteorSpawnTimer >= METEOR_SPAWN_INTERVAL) {
+      meteorSpawnTimer -= METEOR_SPAWN_INTERVAL;
+      meteors.push(newMeteor(angles.grace));
     }
 
-    if (meteor.radius <= GRACE_RADIUS_U) {
-      meteorsImpact += 1;
-      valImpacts.textContent = meteorsImpact;
-      meteor = newMeteor(angles.grace);
-    } else if (meteor.radius >= ABYSS_RADIUS_U) {
-      meteorsRepelled += 1;
-      valRepelled.textContent = meteorsRepelled;
-      meteor = newMeteor(angles.grace);
+    // Update all meteors; collect survivors.
+    var survivors = [];
+    for (var i = 0; i < meteors.length; i++) {
+      var m = meteors[i];
+      m.angle += m.omega * dt;
+      if (isInGraceArc(m.angle, angles.grace)) {
+        m.radius += METEOR_EXPULSION_RATE * dt;
+      } else {
+        m.radius -= METEOR_DESCENT_RATE * dt;
+      }
+      if (m.radius <= GRACE_RADIUS_U) {
+        meteorsImpact += 1;
+        valImpacts.textContent = meteorsImpact;
+      } else if (m.radius >= ABYSS_RADIUS_U) {
+        meteorsRepelled += 1;
+        valRepelled.textContent = meteorsRepelled;
+      } else {
+        survivors.push(m);
+      }
     }
+    meteors = survivors;
 
     var W = canvas.width;
     var H = canvas.height;
@@ -572,15 +585,18 @@
     ctx.fill();
     ctx.restore();
 
-    // Meteor — bright red dot descending from the Wheel of Perdition toward the Wheel of Grace.
+    // Meteors — bright red dots descending toward the Wheel of Grace.
     // Drawn after Grace so overlap remains visible.
-    var meteorRpx = meteor.radius * unitPx;
-    var meteorX = meteorRpx * Math.cos(meteor.angle);
-    var meteorY = meteorRpx * Math.sin(meteor.angle);
-    ctx.beginPath();
-    ctx.arc(meteorX, meteorY, 6, 0, 2 * Math.PI);
-    ctx.fillStyle = '#ff2200';
-    ctx.fill();
+    for (var mi = 0; mi < meteors.length; mi++) {
+      var m = meteors[mi];
+      var meteorRpx = m.radius * unitPx;
+      var meteorX = meteorRpx * Math.cos(m.angle);
+      var meteorY = meteorRpx * Math.sin(m.angle);
+      ctx.beginPath();
+      ctx.arc(meteorX, meteorY, 6, 0, 2 * Math.PI);
+      ctx.fillStyle = '#ff2200';
+      ctx.fill();
+    }
 
     // Ring gear (astral) shown as a single circle with an optional glow highlight behind it.
     var ringGlow = isRingDriven ? 'rgba(0, 183, 255, 0.20)' :
