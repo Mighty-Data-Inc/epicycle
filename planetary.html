@@ -314,29 +314,19 @@
     });
   }
 
-  function handleFixedPress() {
+  function handleBindingPress(targetBinding) {
     var unboundGear = findGearByBinding(GearBinding.UNBOUND);
-    var fixedGear = findGearByBinding(GearBinding.FIXED);
-    if (!unboundGear || !fixedGear) return;
+    var currentGear = findGearByBinding(targetBinding);
+    if (!unboundGear || !currentGear) return;
 
-    gearState[fixedGear] = GearBinding.UNBOUND;
-    gearState[unboundGear] = GearBinding.FIXED;
-    syncButtonStatesFromGearState();
-  }
-
-  function handleDrivenPress() {
-    var unboundGear = findGearByBinding(GearBinding.UNBOUND);
-    var drivenGear = findGearByBinding(GearBinding.DRIVEN);
-    if (!unboundGear || !drivenGear) return;
-
-    gearState[drivenGear] = GearBinding.UNBOUND;
-    gearState[unboundGear] = GearBinding.DRIVEN;
+    gearState[currentGear] = GearBinding.UNBOUND;
+    gearState[unboundGear] = targetBinding;
     syncButtonStatesFromGearState();
   }
 
   Object.keys(gearButtons).forEach(function (gearName) {
-    gearButtons[gearName].fixed.addEventListener('click', handleFixedPress);
-    gearButtons[gearName].driven.addEventListener('click', handleDrivenPress);
+    gearButtons[gearName].fixed.addEventListener('click', function () { handleBindingPress(GearBinding.FIXED); });
+    gearButtons[gearName].driven.addEventListener('click', function () { handleBindingPress(GearBinding.DRIVEN); });
   });
 
   syncButtonStatesFromGearState();
