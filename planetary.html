@@ -233,7 +233,8 @@
   const PLANET_RADIUS_U = PLANET_DIAMETER * 0.5;
   const CARRIER_RADIUS_U = CARRIER_DIAMETER * 0.5;
   const RING_RADIUS_U = RING_DIAMETER * 0.5;
-  const SPIRIT_RADIUS_U = RING_RADIUS_U + 0.5; // 1 unit larger diameter than astral ring
+  const GRACE_RADIUS_U = RING_RADIUS_U + 0.5; // 1 unit larger diameter than astral ring
+  const PERDITION_RADIUS_U = GRACE_RADIUS_U + 1; // outer edge of the wedge
 
   // Driver speed — whichever gear is DRIVEN spins at this rate.
   const DRIVER_SPEED = (2 * Math.PI) / 6; // rad/s (1/6 rev/s)
@@ -286,7 +287,7 @@
   };
 
   // ── animation state ──────────────────────────────────────────────────────
-  var angles = { sun: 0, ring: 0, carrier: 0, planet: 0, spirit: 0 };
+  var angles = { sun: 0, ring: 0, carrier: 0, planet: 0, grace: 0 };
   var lastTimestamp = null;
 
   // ── helpers ───────────────────────────────────────────────────────────────
@@ -430,7 +431,7 @@
     angles.planet  += omegas.planet  * dt;
 
     var unboundKey = GEAR_OMEGA_KEY[findGearByBinding(GearBinding.UNBOUND)];
-    angles.spirit  += (omegas[unboundKey] || 0) * dt;
+    angles.grace   += (omegas[unboundKey] || 0) * dt;
 
     var W = canvas.width;
     var H = canvas.height;
@@ -440,7 +441,8 @@
     var Rp = PLANET_RADIUS_U * unitPx;
     var Rc = CARRIER_RADIUS_U * unitPx;
     var Rr = RING_RADIUS_U * unitPx;
-    var Ro = SPIRIT_RADIUS_U * unitPx;
+    var Ro = GRACE_RADIUS_U * unitPx;
+    var Rp2 = PERDITION_RADIUS_U * unitPx;
 
     // Positive angles are clockwise in canvas coordinates.
     var sunAngle        = angles.sun;
@@ -471,16 +473,23 @@
     ctx.save();
     ctx.translate(W / 2, H / 2);
 
-    // Spirit wheel — rotates at the speed of the free (unbound) gear.
+    // Wheel of Perdition — static dark purple boundary circle at the outer edge of the wedge.
+    ctx.beginPath();
+    ctx.arc(0, 0, Rp2, 0, 2 * Math.PI);
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = '#8b0000';
+    ctx.stroke();
+
+    // Wheel of Grace — rotates at the speed of the free (unbound) gear.
     ctx.save();
-    ctx.rotate(angles.spirit);
+    ctx.rotate(angles.grace);
     ctx.beginPath();
     ctx.arc(0, 0, Ro, 0, 2 * Math.PI);
     ctx.lineWidth = 1.5;
     ctx.strokeStyle = '#ffffff';
     ctx.stroke();
 
-    // Wedge projecting outward from 0deg mark of spirit wheel, 1/12 circle wide, 1 unit deep.
+    // Wedge projecting outward from 0deg mark of Wheel of Grace, 1/12 circle wide, 1 unit deep.
     var wedgeSpan = (2 * Math.PI) / 12; // π/6
     var wedgeOuter = Ro + unitPx;
     ctx.beginPath();
