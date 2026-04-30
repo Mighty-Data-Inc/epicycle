@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Epicycle Demo</title>
+  <title>Planetary Gear Demo</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -93,7 +93,7 @@
 </head>
 <body>
 
-<header>Epicycle Demo</header>
+<header>Planetary Gear Demo (Sun fixed, Astral ring driven)</header>
 
 <div id="canvas-wrap">
   <canvas id="canvas"></canvas>
@@ -101,14 +101,12 @@
 
 <div id="controls">
   <div class="ctrl">
-    <label for="sliderRadius">Secondary radius</label>
-    <input type="range" id="sliderRadius" min="0" max="1" step="0.01" value="0.5">
-    <span class="val" id="valRadius">0.50</span>
+    <label>Driver speed (ring)</label>
+    <span class="val" id="valDrive">0.167 rev/s</span>
   </div>
   <div class="ctrl">
-    <label for="sliderRate">Secondary rate</label>
-    <input type="range" id="sliderRate" min="-5" max="5" step="0.1" value="2">
-    <span class="val" id="valRate">2.0×</span>
+    <label>Carrier speed</label>
+    <span class="val" id="valCarrier">0.125 rev/s</span>
   </div>
   <div class="ctrl">
     <button id="btnClear">Clear Trail</button>
@@ -122,24 +120,34 @@
   const canvas       = document.getElementById('canvas');
   const ctx          = canvas.getContext('2d');
   const wrap         = document.getElementById('canvas-wrap');
-  const sliderRadius = document.getElementById('sliderRadius');
-  const sliderRate   = document.getElementById('sliderRate');
-  const valRadius    = document.getElementById('valRadius');
-  const valRate      = document.getElementById('valRate');
+  const valDrive     = document.getElementById('valDrive');
+  const valCarrier   = document.getElementById('valCarrier');
   const btnClear     = document.getElementById('btnClear');
 
-  // ── parameters ──────────────────────────────────────────────────────────
-  /** Seconds for one full clockwise revolution of the primary circle. */
-  const PRIMARY_PERIOD = 10;
+  // ── planetary gear setup (units are geometric units, then scaled to px) ──
+  const SUN_DIAMETER = 1;
+  const PLANET_DIAMETER = 1;
+  const CARRIER_DIAMETER = 2;
+  const RING_DIAMETER = 3;
 
-  /** Secondary radius as a fraction of the primary radius (0–1). */
-  let p2radius = parseFloat(sliderRadius.value);
+  const SUN_RADIUS_U = SUN_DIAMETER * 0.5;
+  const PLANET_RADIUS_U = PLANET_DIAMETER * 0.5;
+  const CARRIER_RADIUS_U = CARRIER_DIAMETER * 0.5;
+  const RING_RADIUS_U = RING_DIAMETER * 0.5;
 
-  /** Secondary angular rate relative to the primary rate (can be negative). */
-  let p2rate = parseFloat(sliderRate.value);
+  // Ring (astral gear) is driven at 1/6 rev/s clockwise.
+  const OMEGA_RING = (2 * Math.PI) / 6;
+  // Sun fixed.
+  const OMEGA_SUN = 0;
+  // Simple planetary relation: (Ns + Nr)wc = Ns*ws + Nr*wr.
+  // Tooth counts are proportional to diameters here: Ns = 1, Nr = 3.
+  const OMEGA_CARRIER = (SUN_DIAMETER * OMEGA_SUN + RING_DIAMETER * OMEGA_RING) /
+    (SUN_DIAMETER + RING_DIAMETER);
+  // Planet spin from external mesh with fixed sun (Rs = Rp): wp = 2*wc - ws.
+  const OMEGA_PLANET = (2 * OMEGA_CARRIER) - OMEGA_SUN;
 
   // ── trail ────────────────────────────────────────────────────────────────
-  /** Positions of the red dot in canvas-centred coordinates. */
+  /** Positions of the planet 0deg marker in canvas-centred coordinates. */
   let trail = [];
   const TRAIL_MAX = 6000;
 
@@ -155,17 +163,8 @@
   function clearTrail() { trail = []; }
 
   // ── controls ──────────────────────────────────────────────────────────────
-  sliderRadius.addEventListener('input', function () {
-    p2radius = parseFloat(this.value);
-    valRadius.textContent = p2radius.toFixed(2);
-    clearTrail();
-  });
-
-  sliderRate.addEventListener('input', function () {
-    p2rate = parseFloat(this.value);
-    valRate.textContent = p2rate.toFixed(1) + '\u00d7';
-    clearTrail();
-  });
+  valDrive.textContent = (OMEGA_RING / (2 * Math.PI)).toFixed(3) + ' rev/s';
+  valCarrier.textContent = (OMEGA_CARRIER / (2 * Math.PI)).toFixed(3) + ' rev/s';
 
   btnClear.addEventListener('click', clearTrail);
 
@@ -179,31 +178,33 @@
   // ── draw loop ──────────────────────────────────────────────────────────────
   function draw(timestamp) {
     if (startTime === null) startTime = timestamp;
-    var t  = (timestamp - startTime) / 1000; // elapsed seconds
-    var W  = canvas.width;
-    var H  = canvas.height;
-    var R1 = Math.min(W, H) * 0.35;          // primary radius in px
-    var R2 = R1 * p2radius;                  // secondary radius in px
+    var t = (timestamp - startTime) / 1000; // elapsed seconds
+    var W = canvas.width;
+    var H = canvas.height;
+    var unitPx = Math.min(W, H) * 0.24;
 
-    // Angles — clockwise rotation ⟹ angle increases with time in canvas
-    // coordinates (y-axis points down).
-    var theta1 = (2 * Math.PI * t) / PRIMARY_PERIOD;
-    var theta2 = (2 * Math.PI * t * p2rate) / PRIMARY_PERIOD;
+    var Rs = SUN_RADIUS_U * unitPx;
+    var Rp = PLANET_RADIUS_U * unitPx;
+    var Rc = CARRIER_RADIUS_U * unitPx;
+    var Rr = RING_RADIUS_U * unitPx;
 
-    // Blue dot: on primary circle, offset from canvas centre
-    var bx = R1 * Math.cos(theta1);
-    var by = R1 * Math.sin(theta1);
+    // Positive angles are clockwise in canvas coordinates.
+    var sunAngle = OMEGA_SUN * t;
+    var ringAngle = OMEGA_RING * t;
+    var carrierAngle = OMEGA_CARRIER * t;
+    var planetSpinAngle = OMEGA_PLANET * t;
 
-    // Red dot: on secondary circle, angle relative to the rotating primary arm
-    var rx = bx + R2 * Math.cos(theta1 + theta2);
-    var ry = by + R2 * Math.sin(theta1 + theta2);
+    // Planet center moves on the carrier radius.
+    var px = Rc * Math.cos(carrierAngle);
+    var py = Rc * Math.sin(carrierAngle);
 
-    // Accumulate trail when the secondary circle has non-zero size
-    if (R2 > 0) {
-      trail.push({ x: rx, y: ry });
-      if (trail.length > TRAIL_MAX) {
-        trail.splice(0, trail.length - TRAIL_MAX);
-      }
+    // Planet 0deg marker rotates with the planet body.
+    var pMarkX = px + Rp * Math.cos(planetSpinAngle);
+    var pMarkY = py + Rp * Math.sin(planetSpinAngle);
+
+    trail.push({ x: pMarkX, y: pMarkY });
+    if (trail.length > TRAIL_MAX) {
+      trail.splice(0, trail.length - TRAIL_MAX);
     }
 
     // ── render ──────────────────────────────────────────────────────────────
@@ -211,14 +212,14 @@
     ctx.save();
     ctx.translate(W / 2, H / 2);
 
-    // Trail — drawn in batches so older segments are more transparent
+    // Planet marker trail.
     if (trail.length > 1) {
-      var n        = trail.length;
-      var BATCHES  = 8;
+      var n = trail.length;
+      var BATCHES = 8;
       var batchLen = Math.ceil(n / BATCHES);
       ctx.lineWidth = 1.5;
       for (var b = 0; b < BATCHES; b++) {
-        var alpha = ((b + 1) / BATCHES) * 0.85;
+        var alpha = ((b + 1) / BATCHES) * 0.8;
         var s = b * batchLen;
         if (s >= n) break;
         var e = Math.min(s + batchLen + 1, n);
@@ -227,59 +228,76 @@
         for (var i = s + 1; i < e; i++) {
           ctx.lineTo(trail[i].x, trail[i].y);
         }
-        ctx.strokeStyle = 'rgba(220, 60, 60, ' + alpha + ')';
+        ctx.strokeStyle = 'rgba(90, 240, 120, ' + alpha + ')';
         ctx.stroke();
       }
     }
 
-    // Primary circle (grey circumference, not filled)
+    // Ring gear (astral) shown as a thick annulus.
     ctx.beginPath();
-    ctx.arc(0, 0, R1, 0, 2 * Math.PI);
-    ctx.strokeStyle = '#555';
+    ctx.arc(0, 0, Rr + 7, 0, 2 * Math.PI);
+    ctx.arc(0, 0, Rr - 7, 0, 2 * Math.PI, true);
+    ctx.fillStyle = '#2b3240';
+    ctx.fill();
     ctx.lineWidth = 1.5;
+    ctx.strokeStyle = '#6b778f';
     ctx.stroke();
 
-    // Arm from centre to blue dot
+    // Carrier arm.
     ctx.beginPath();
     ctx.moveTo(0, 0);
-    ctx.lineTo(bx, by);
-    ctx.strokeStyle = 'rgba(80, 160, 255, 0.35)';
-    ctx.lineWidth = 1;
+    ctx.lineTo(px, py);
+    ctx.strokeStyle = 'rgba(180, 205, 235, 0.7)';
+    ctx.lineWidth = 3;
     ctx.stroke();
 
-    if (R2 > 0) {
-      // Secondary circle (grey circumference, not filled)
-      ctx.beginPath();
-      ctx.arc(bx, by, R2, 0, 2 * Math.PI);
-      ctx.strokeStyle = '#555';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-
-      // Arm from blue dot to red dot
-      ctx.beginPath();
-      ctx.moveTo(bx, by);
-      ctx.lineTo(rx, ry);
-      ctx.strokeStyle = 'rgba(255, 90, 90, 0.35)';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-
-      // Red dot
-      ctx.beginPath();
-      ctx.arc(rx, ry, 6, 0, 2 * Math.PI);
-      ctx.fillStyle = '#ff3333';
-      ctx.fill();
-    }
-
-    // Blue dot (drawn after secondary circle so it renders on top)
+    // Sun gear.
     ctx.beginPath();
-    ctx.arc(bx, by, 6, 0, 2 * Math.PI);
-    ctx.fillStyle = '#22aaff';
+    ctx.arc(0, 0, Rs, 0, 2 * Math.PI);
+    ctx.fillStyle = '#2d3036';
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = '#8f99aa';
+    ctx.stroke();
+
+    // Planet gear.
+    ctx.beginPath();
+    ctx.arc(px, py, Rp, 0, 2 * Math.PI);
+    ctx.fillStyle = '#2d3036';
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = '#8f99aa';
+    ctx.stroke();
+
+    // 0deg marker dots for visible rotation state.
+    var sunMarkX = Rs * Math.cos(sunAngle);
+    var sunMarkY = Rs * Math.sin(sunAngle);
+    ctx.beginPath();
+    ctx.arc(sunMarkX, sunMarkY, 5, 0, 2 * Math.PI);
+    ctx.fillStyle = '#ffd84a'; // yellow (sun)
     ctx.fill();
 
-    // Small reference dot at the canvas centre
+    ctx.beginPath();
+    ctx.arc(pMarkX, pMarkY, 5, 0, 2 * Math.PI);
+    ctx.fillStyle = '#66ff88'; // green (planet)
+    ctx.fill();
+
+    var ringMarkX = Rr * Math.cos(ringAngle);
+    var ringMarkY = Rr * Math.sin(ringAngle);
+    ctx.beginPath();
+    ctx.arc(ringMarkX, ringMarkY, 5, 0, 2 * Math.PI);
+    ctx.fillStyle = '#b56dff'; // violet (astral ring)
+    ctx.fill();
+
+    // Centres.
     ctx.beginPath();
     ctx.arc(0, 0, 3, 0, 2 * Math.PI);
-    ctx.fillStyle = '#666';
+    ctx.fillStyle = '#999';
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(px, py, 3, 0, 2 * Math.PI);
+    ctx.fillStyle = '#999';
     ctx.fill();
 
     ctx.restore();

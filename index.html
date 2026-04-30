@@ -194,9 +194,9 @@
     var bx = R1 * Math.cos(theta1);
     var by = R1 * Math.sin(theta1);
 
-    // Red dot: on secondary circle, angle relative to the rotating primary arm
-    var rx = bx + R2 * Math.cos(theta1 + theta2);
-    var ry = by + R2 * Math.sin(theta1 + theta2);
+    // Red dot: on secondary circle
+    var rx = bx + R2 * Math.cos(theta2);
+    var ry = by + R2 * Math.sin(theta2);
 
     // Accumulate trail when the secondary circle has non-zero size
     if (R2 > 0) {
