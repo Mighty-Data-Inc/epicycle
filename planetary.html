@@ -216,10 +216,18 @@
   };
 
   // ── planetary gear setup (units are geometric units, then scaled to px) ──
-  const SUN_DIAMETER = 1;
-  const PLANET_DIAMETER = 1;
-  const CARRIER_DIAMETER = 2;
-  const RING_DIAMETER = 3;
+  // Use relatively prime sun/planet tooth counts (both >= 8) for practical geometry.
+  const SUN_TEETH = 13;
+  const PLANET_TEETH = 8;
+  const RING_TEETH = SUN_TEETH + (2 * PLANET_TEETH);
+
+  // Diameters are proportional to tooth counts for consistent kinematic ratios.
+  // Normalize by ring teeth so the full train keeps a stable on-canvas size.
+  const DIAMETER_SCALE = 3 / RING_TEETH;
+  const SUN_DIAMETER = SUN_TEETH * DIAMETER_SCALE;
+  const PLANET_DIAMETER = PLANET_TEETH * DIAMETER_SCALE;
+  const CARRIER_DIAMETER = SUN_DIAMETER + PLANET_DIAMETER;
+  const RING_DIAMETER = SUN_DIAMETER + (2 * PLANET_DIAMETER);
 
   const SUN_RADIUS_U = SUN_DIAMETER * 0.5;
   const PLANET_RADIUS_U = PLANET_DIAMETER * 0.5;
@@ -234,10 +242,10 @@
 
   // Compute angular velocities from the current gearState.
   // Uses: (Ns + Nr)*wc = Ns*ws + Nr*wr  (simple planetary Willis formula)
-  // Tooth counts are proportional to diameters: Ns=1, Nr=3.
   function computeOmegas() {
-    var Ns = SUN_DIAMETER;    // 1
-    var Nr = RING_DIAMETER;   // 3
+    var Ns = SUN_TEETH;
+    var Np = PLANET_TEETH;
+    var Nr = RING_TEETH;
     var ws, wr, wc;
 
     if      (gearState.Solar     === GearBinding.DRIVEN) ws = DRIVER_SPEED;
@@ -254,7 +262,12 @@
     else if (gearState.Astral    === GearBinding.UNBOUND) wr = ((Ns + Nr) * wc - Ns * ws) / Nr;
     else if (gearState.Solar     === GearBinding.UNBOUND) ws = ((Ns + Nr) * wc - Nr * wr) / Ns;
 
-    return { sun: ws, ring: wr, carrier: wc, planet: 2 * wc - ws };
+    // Planet spin from sun-planet external mesh:
+    // (Rs + Rp)wc = Rs*ws + Rp*wp  ->  wp = ((Rs+Rp)wc - Rs*ws)/Rp
+    // Radii are proportional to tooth counts, so N can be used directly here.
+    var wp = ((Ns + Np) * wc - (Ns * ws)) / Np;
+
+    return { sun: ws, ring: wr, carrier: wc, planet: wp };
   }
 
   // ── gear state model ──────────────────────────────────────────────────────
@@ -452,7 +465,7 @@
     ctx.lineWidth = 1.5;
     ctx.strokeStyle = '#6b778f';
     ctx.stroke();
-    drawTicks(Rr, 108, ringAngle, -(Rr * 0.04)); // inward ticks
+    drawTicks(Rr, RING_TEETH, ringAngle, -(Rr * 0.04)); // inward ticks
 
     // Carrier arm.
     ctx.beginPath();
@@ -468,7 +481,7 @@
     ctx.strokeStyle = 'rgba(180, 205, 235, 0.35)';
     ctx.lineWidth = 1;
     ctx.stroke();
-    drawTicks(Rc, 36, carrierAngle, Rc * 0.06);
+    drawTicks(Rc, SUN_TEETH, carrierAngle, Rc * 0.06);
 
     // Sun gear.
     ctx.beginPath();
@@ -478,7 +491,7 @@
     ctx.lineWidth = 1.5;
     ctx.strokeStyle = '#8f99aa';
     ctx.stroke();
-    drawTicks(Rs, 36, sunAngle, Rs * 0.12);
+    drawTicks(Rs, SUN_TEETH, sunAngle, Rs * 0.12);
 
     // Planet gear.
     ctx.save();
@@ -490,7 +503,7 @@
     ctx.lineWidth = 1.5;
     ctx.strokeStyle = '#8f99aa';
     ctx.stroke();
-    drawTicks(Rp, 36, planetSpinAngle, Rp * 0.12);
+    drawTicks(Rp, PLANET_TEETH, planetSpinAngle, Rp * 0.12);
     ctx.restore();
 
     // 0deg marker dots for visible rotation state.
