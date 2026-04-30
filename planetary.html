@@ -224,6 +224,14 @@
     ctx.lineWidth = 3;
     ctx.stroke();
 
+    // Carrier circle (not a gear, but useful for visualizing carrier rotation).
+    ctx.beginPath();
+    ctx.arc(0, 0, Rc, 0, 2 * Math.PI);
+    ctx.strokeStyle = 'rgba(180, 205, 235, 0.35)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    drawTicks(Rc, 36, carrierAngle, Rc * 0.06);
+
     // Sun gear.
     ctx.beginPath();
     ctx.arc(0, 0, Rs, 0, 2 * Math.PI);
