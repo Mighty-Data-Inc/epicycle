@@ -47,6 +47,23 @@
       display: block;
     }
 
+    #resultBanner {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      padding: 12px 20px;
+      background: rgba(13, 17, 23, 0.9);
+      border: 1px solid #88bbdd;
+      border-radius: 8px;
+      color: #ffffff;
+      font-size: 1.8rem;
+      letter-spacing: 0.04em;
+      display: none;
+      z-index: 3;
+      pointer-events: none;
+    }
+
     #controls {
       background: #0d1117;
       border-left: 1px solid #222;
@@ -154,6 +171,7 @@
 <div id="main">
 <div id="canvas-wrap">
   <canvas id="canvas"></canvas>
+  <div id="resultBanner" aria-live="polite"></div>
 </div>
 <div id="controls">
   <div class="gear-grid">
@@ -210,6 +228,7 @@
   const valOutput    = document.getElementById('valOutput');
   const valImpacts   = document.getElementById('valImpacts');
   const valRepelled  = document.getElementById('valRepelled');
+  const resultBanner = document.getElementById('resultBanner');
   const gearButtons  = {
     Earth: {
       fixed: document.getElementById('btnFixedEarth'),
@@ -305,9 +324,38 @@
   // Descent rate: 1 distance unit in 12 seconds (= 2 full driver revolutions).
   const GRACE_ARC_SPAN = (2 * Math.PI) / 12;
   const METEOR_DESCENT_RATE = 1 / 12; // units per second
-  const METEOR_EXPULSION_RATE = METEOR_DESCENT_RATE * 3;
+  const METEOR_EXPULSION_RATE = METEOR_DESCENT_RATE * 5;
   var meteorsImpact = 0;
   var meteorsRepelled = 0;
+
+  function readMaxFromQuery(paramName) {
+    var raw = new URLSearchParams(window.location.search).get(paramName);
+    if (raw === null || raw === '') return Number.POSITIVE_INFINITY;
+    var parsed = Number(raw);
+    if (!Number.isFinite(parsed) || parsed < 0) return Number.POSITIVE_INFINITY;
+    return Math.floor(parsed);
+  }
+
+  var maxImpacts = readMaxFromQuery('maxImpacts');
+  var maxRepels = readMaxFromQuery('maxRepels');
+  var gameOver = false;
+
+  function updateVictoryState() {
+    if (gameOver) return;
+
+    if (meteorsImpact >= maxImpacts) {
+      gameOver = true;
+      resultBanner.textContent = 'You lose';
+      resultBanner.style.display = 'block';
+      return;
+    }
+
+    if (meteorsRepelled >= maxRepels) {
+      gameOver = true;
+      resultBanner.textContent = 'You win!';
+      resultBanner.style.display = 'block';
+    }
+  }
 
   function normalizeAngle(angle) {
     var twoPi = 2 * Math.PI;
@@ -430,6 +478,7 @@
 
   syncButtonStatesFromGearState();
   updateReadouts();
+  updateVictoryState();
 
   window.addEventListener('keydown', function (e) {
     if (e.key === 'ArrowLeft')  handleBindingPress(GearBinding.FIXED);
@@ -481,11 +530,13 @@
     var unboundKey = GEAR_OMEGA_KEY[findGearByBinding(GearBinding.UNBOUND)];
     angles.grace   += (omegas[unboundKey] || 0) * dt;
 
-    // Spawn a new meteor every METEOR_SPAWN_INTERVAL seconds.
-    meteorSpawnTimer += dt;
-    if (meteorSpawnTimer >= METEOR_SPAWN_INTERVAL) {
-      meteorSpawnTimer -= METEOR_SPAWN_INTERVAL;
-      meteors.push(newMeteor(angles.grace));
+    // Spawn a new meteor every METEOR_SPAWN_INTERVAL seconds until game over.
+    if (!gameOver) {
+      meteorSpawnTimer += dt;
+      if (meteorSpawnTimer >= METEOR_SPAWN_INTERVAL) {
+        meteorSpawnTimer -= METEOR_SPAWN_INTERVAL;
+        meteors.push(newMeteor(angles.grace));
+      }
     }
 
     // Update all meteors; collect survivors.
@@ -501,9 +552,11 @@
       if (m.radius <= GRACE_RADIUS_U) {
         meteorsImpact += 1;
         valImpacts.textContent = meteorsImpact;
+        updateVictoryState();
       } else if (m.radius >= ABYSS_RADIUS_U) {
         meteorsRepelled += 1;
         valRepelled.textContent = meteorsRepelled;
+        updateVictoryState();
       } else {
         survivors.push(m);
       }
