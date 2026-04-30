@@ -149,7 +149,7 @@
 </head>
 <body>
 
-<header>Planetary Gear Demo (Sun fixed, Astral ring driven)</header>
+<header>Planetary Gear Demo</header>
 
 <div id="main">
 <div id="canvas-wrap">
@@ -233,6 +233,7 @@
   const PLANET_RADIUS_U = PLANET_DIAMETER * 0.5;
   const CARRIER_RADIUS_U = CARRIER_DIAMETER * 0.5;
   const RING_RADIUS_U = RING_DIAMETER * 0.5;
+  const SPIRIT_RADIUS_U = RING_RADIUS_U + 0.5; // 1 unit larger diameter than astral ring
 
   // Driver speed — whichever gear is DRIVEN spins at this rate.
   const DRIVER_SPEED = (2 * Math.PI) / 6; // rad/s (1/6 rev/s)
@@ -285,7 +286,7 @@
   };
 
   // ── animation state ──────────────────────────────────────────────────────
-  var angles = { sun: 0, ring: 0, carrier: 0, planet: 0 };
+  var angles = { sun: 0, ring: 0, carrier: 0, planet: 0, spirit: 0 };
   var lastTimestamp = null;
 
   // ── helpers ───────────────────────────────────────────────────────────────
@@ -298,7 +299,7 @@
   function layoutControls() {
     var W = canvas.width;
     var H = canvas.height;
-    var unitPx = Math.min(W, H) * 0.24;
+    var unitPx = Math.min(W, H) * 0.10;
     var Rr = RING_RADIUS_U * unitPx;
     var panelWidth = controls.offsetWidth || 240;
 
@@ -428,14 +429,18 @@
     angles.carrier += omegas.carrier * dt;
     angles.planet  += omegas.planet  * dt;
 
+    var unboundKey = GEAR_OMEGA_KEY[findGearByBinding(GearBinding.UNBOUND)];
+    angles.spirit  += (omegas[unboundKey] || 0) * dt;
+
     var W = canvas.width;
     var H = canvas.height;
-    var unitPx = Math.min(W, H) * 0.24;
+    var unitPx = Math.min(W, H) * 0.10;
 
     var Rs = SUN_RADIUS_U * unitPx;
     var Rp = PLANET_RADIUS_U * unitPx;
     var Rc = CARRIER_RADIUS_U * unitPx;
     var Rr = RING_RADIUS_U * unitPx;
+    var Ro = SPIRIT_RADIUS_U * unitPx;
 
     // Positive angles are clockwise in canvas coordinates.
     var sunAngle        = angles.sun;
@@ -466,14 +471,46 @@
     ctx.save();
     ctx.translate(W / 2, H / 2);
 
-    // Ring gear (astral) shown as a thick annulus.
+    // Spirit wheel — rotates at the speed of the free (unbound) gear.
+    ctx.save();
+    ctx.rotate(angles.spirit);
     ctx.beginPath();
-    ctx.arc(0, 0, Rr + 7, 0, 2 * Math.PI);
-    ctx.arc(0, 0, Rr - 7, 0, 2 * Math.PI, true);
-    ctx.fillStyle = '#2b3240';
+    ctx.arc(0, 0, Ro, 0, 2 * Math.PI);
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = '#ffffff';
+    ctx.stroke();
+
+    // Wedge projecting outward from 0deg mark of spirit wheel, 1/12 circle wide, 1 unit deep.
+    var wedgeSpan = (2 * Math.PI) / 12; // π/6
+    var wedgeOuter = Ro + unitPx;
+    ctx.beginPath();
+    ctx.arc(0, 0, Ro, 0, wedgeSpan);
+    ctx.arc(0, 0, wedgeOuter, wedgeSpan, 0, true);
+    ctx.closePath();
+    ctx.fillStyle = '#ffffff';
     ctx.fill();
-    ctx.lineWidth = isRingDriven ? 3 : (isRingFixed ? 2.5 : (isRingUnbound ? 2.5 : 1.5));
-    ctx.strokeStyle = isRingDriven ? '#00b7ff' : (isRingFixed ? '#ffb020' : (isRingUnbound ? '#ffffff' : '#6b778f'));
+    ctx.restore();
+
+    // Ring gear (astral) shown as a single circle with an optional glow highlight behind it.
+    var ringGlow = isRingDriven ? 'rgba(0, 183, 255, 0.20)' :
+      (isRingFixed ? 'rgba(255, 176, 32, 0.20)' :
+        (isRingUnbound ? 'rgba(255, 255, 255, 0.55)' : null));
+
+    if (ringGlow) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(0, 0, Rr, 0, 2 * Math.PI);
+      ctx.lineWidth = 14;
+      ctx.shadowColor = ringGlow;
+      ctx.shadowBlur = 12;
+      ctx.strokeStyle = ringGlow;
+      ctx.stroke();
+      ctx.restore();
+    }
+    ctx.beginPath();
+    ctx.arc(0, 0, Rr, 0, 2 * Math.PI);
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = '#6b778f';
     ctx.stroke();
     drawTicks(Rr, RING_TEETH, ringAngle, -(Rr * 0.04)); // inward ticks
 
@@ -486,20 +523,50 @@
     ctx.stroke();
 
     // Carrier circle (not a gear, but useful for visualizing carrier rotation).
+    var carrierGlow = isCarrierDriven ? 'rgba(0, 183, 255, 0.20)' :
+      (isCarrierFixed ? 'rgba(255, 176, 32, 0.20)' :
+        (isCarrierUnbound ? 'rgba(255, 255, 255, 0.55)' : null));
+
+    if (carrierGlow) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(0, 0, Rc, 0, 2 * Math.PI);
+      ctx.lineWidth = 13;
+      ctx.shadowColor = carrierGlow;
+      ctx.shadowBlur = 11;
+      ctx.strokeStyle = carrierGlow;
+      ctx.stroke();
+      ctx.restore();
+    }
     ctx.beginPath();
     ctx.arc(0, 0, Rc, 0, 2 * Math.PI);
-    ctx.strokeStyle = isCarrierDriven ? '#00b7ff' : (isCarrierFixed ? '#ffb020' : (isCarrierUnbound ? '#ffffff' : 'rgba(180, 205, 235, 0.35)'));
-    ctx.lineWidth = isCarrierDriven ? 2.5 : (isCarrierFixed ? 2.25 : (isCarrierUnbound ? 2.25 : 1));
+    ctx.strokeStyle = 'rgba(180, 205, 235, 0.35)';
+    ctx.lineWidth = 1;
     ctx.stroke();
     drawTicks(Rc, SUN_TEETH, carrierAngle, Rc * 0.06);
 
     // Sun gear.
+    var sunGlow = isSunDriven ? 'rgba(0, 183, 255, 0.20)' :
+      (isSunFixed ? 'rgba(255, 176, 32, 0.20)' :
+        (isSunUnbound ? 'rgba(255, 255, 255, 0.55)' : null));
+
+    if (sunGlow) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(0, 0, Rs, 0, 2 * Math.PI);
+      ctx.lineWidth = 13;
+      ctx.shadowColor = sunGlow;
+      ctx.shadowBlur = 11;
+      ctx.strokeStyle = sunGlow;
+      ctx.stroke();
+      ctx.restore();
+    }
     ctx.beginPath();
     ctx.arc(0, 0, Rs, 0, 2 * Math.PI);
     ctx.fillStyle = '#2d3036';
     ctx.fill();
-    ctx.lineWidth = isSunDriven ? 3 : (isSunFixed ? 2.5 : (isSunUnbound ? 2.5 : 1.5));
-    ctx.strokeStyle = isSunDriven ? '#00b7ff' : (isSunFixed ? '#ffb020' : (isSunUnbound ? '#ffffff' : '#8f99aa'));
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = '#8f99aa';
     ctx.stroke();
     drawTicks(Rs, SUN_TEETH, sunAngle, Rs * 0.12);
 
