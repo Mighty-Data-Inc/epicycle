@@ -179,12 +179,12 @@
 
 <div id="readouts-bar">
   <div class="ctrl">
-    <label>Driver speed (ring)</label>
-    <span class="val" id="valDrive">0.167 rev/s</span>
+    <label id="lblDrive">Driver speed</label>
+    <span class="val" id="valDrive">—</span>
   </div>
   <div class="ctrl">
-    <label>Carrier speed</label>
-    <span class="val" id="valCarrier">0.125 rev/s</span>
+    <label id="lblOutput">Output speed</label>
+    <span class="val" id="valOutput">—</span>
   </div>
 </div>
 
@@ -197,7 +197,9 @@
   const wrap         = document.getElementById('canvas-wrap');
   const controls     = document.getElementById('controls');
   const valDrive     = document.getElementById('valDrive');
-  const valCarrier   = document.getElementById('valCarrier');
+  const lblOutput    = document.getElementById('lblOutput');
+  const lblDrive     = document.getElementById('lblDrive');
+  const valOutput    = document.getElementById('valOutput');
   const gearButtons  = {
     Solar: {
       fixed: document.getElementById('btnFixedSolar'),
@@ -224,16 +226,36 @@
   const CARRIER_RADIUS_U = CARRIER_DIAMETER * 0.5;
   const RING_RADIUS_U = RING_DIAMETER * 0.5;
 
-  // Ring (astral gear) is driven at 1/6 rev/s clockwise.
-  const OMEGA_RING = (2 * Math.PI) / 6;
-  // Sun fixed.
-  const OMEGA_SUN = 0;
-  // Simple planetary relation: (Ns + Nr)wc = Ns*ws + Nr*wr.
-  // Tooth counts are proportional to diameters here: Ns = 1, Nr = 3.
-  const OMEGA_CARRIER = (SUN_DIAMETER * OMEGA_SUN + RING_DIAMETER * OMEGA_RING) /
-    (SUN_DIAMETER + RING_DIAMETER);
-  // Planet spin from external mesh with fixed sun (Rs = Rp): wp = 2*wc - ws.
-  const OMEGA_PLANET = (2 * OMEGA_CARRIER) - OMEGA_SUN;
+  // Driver speed — whichever gear is DRIVEN spins at this rate.
+  const DRIVER_SPEED = (2 * Math.PI) / 6; // rad/s (1/6 rev/s)
+
+  // Map gearState keys to the omega keys returned by computeOmegas().
+  const GEAR_OMEGA_KEY = { Solar: 'sun', Astral: 'ring', Planetary: 'carrier' };
+
+  // Compute angular velocities from the current gearState.
+  // Uses: (Ns + Nr)*wc = Ns*ws + Nr*wr  (simple planetary Willis formula)
+  // Tooth counts are proportional to diameters: Ns=1, Nr=3.
+  function computeOmegas() {
+    var Ns = SUN_DIAMETER;    // 1
+    var Nr = RING_DIAMETER;   // 3
+    var ws, wr, wc;
+
+    if      (gearState.Solar     === GearBinding.DRIVEN) ws = DRIVER_SPEED;
+    else if (gearState.Solar     === GearBinding.FIXED)  ws = 0;
+
+    if      (gearState.Astral    === GearBinding.DRIVEN) wr = DRIVER_SPEED;
+    else if (gearState.Astral    === GearBinding.FIXED)  wr = 0;
+
+    if      (gearState.Planetary === GearBinding.DRIVEN) wc = DRIVER_SPEED;
+    else if (gearState.Planetary === GearBinding.FIXED)  wc = 0;
+
+    // Solve for the UNBOUND gear via the planetary relation.
+    if      (gearState.Planetary === GearBinding.UNBOUND) wc = (Ns * ws + Nr * wr) / (Ns + Nr);
+    else if (gearState.Astral    === GearBinding.UNBOUND) wr = ((Ns + Nr) * wc - Ns * ws) / Nr;
+    else if (gearState.Solar     === GearBinding.UNBOUND) ws = ((Ns + Nr) * wc - Nr * wr) / Ns;
+
+    return { sun: ws, ring: wr, carrier: wc, planet: 2 * wc - ws };
+  }
 
   // ── gear state model ──────────────────────────────────────────────────────
   const GearBinding = Object.freeze({
@@ -250,7 +272,8 @@
   };
 
   // ── animation state ──────────────────────────────────────────────────────
-  let startTime = null;
+  var angles = { sun: 0, ring: 0, carrier: 0, planet: 0 };
+  var lastTimestamp = null;
 
   // ── helpers ───────────────────────────────────────────────────────────────
   function resizeCanvas() {
@@ -290,9 +313,21 @@
     controls.style.left = left + 'px';
   }
 
-  // ── controls ──────────────────────────────────────────────────────────────
-  valDrive.textContent = (OMEGA_RING / (2 * Math.PI)).toFixed(3) + ' rev/s';
-  valCarrier.textContent = (OMEGA_CARRIER / (2 * Math.PI)).toFixed(3) + ' rev/s';
+  // ── readouts ──────────────────────────────────────────────────────────────
+  function updateReadouts() {
+    var drivenGear  = findGearByBinding(GearBinding.DRIVEN);
+    var unboundGear = findGearByBinding(GearBinding.UNBOUND);
+    var omegas = computeOmegas();
+
+    valDrive.textContent = (DRIVER_SPEED / (2 * Math.PI)).toFixed(3) + ' rev/s';
+    if (drivenGear) lblDrive.textContent = drivenGear + ' (driver)';
+
+    if (unboundGear) {
+      var unboundOmega = omegas[GEAR_OMEGA_KEY[unboundGear]];
+      lblOutput.textContent = unboundGear + ' output';
+      valOutput.textContent = (unboundOmega / (2 * Math.PI)).toFixed(3) + ' rev/s';
+    }
+  }
 
   function syncButtonStatesFromGearState() {
     Object.keys(gearButtons).forEach(function (gearName) {
@@ -322,6 +357,7 @@
     gearState[currentGear] = GearBinding.UNBOUND;
     gearState[unboundGear] = targetBinding;
     syncButtonStatesFromGearState();
+    updateReadouts();
   }
 
   Object.keys(gearButtons).forEach(function (gearName) {
@@ -330,6 +366,7 @@
   });
 
   syncButtonStatesFromGearState();
+  updateReadouts();
 
   window.addEventListener('keydown', function (e) {
     if (e.key === 'ArrowLeft')  handleBindingPress(GearBinding.FIXED);
@@ -368,8 +405,16 @@
 
   // ── draw loop ──────────────────────────────────────────────────────────────
   function draw(timestamp) {
-    if (startTime === null) startTime = timestamp;
-    var t = (timestamp - startTime) / 1000; // elapsed seconds
+    if (lastTimestamp === null) lastTimestamp = timestamp;
+    var dt = (timestamp - lastTimestamp) / 1000; // elapsed seconds since last frame
+    lastTimestamp = timestamp;
+
+    var omegas = computeOmegas();
+    angles.sun     += omegas.sun     * dt;
+    angles.ring    += omegas.ring    * dt;
+    angles.carrier += omegas.carrier * dt;
+    angles.planet  += omegas.planet  * dt;
+
     var W = canvas.width;
     var H = canvas.height;
     var unitPx = Math.min(W, H) * 0.24;
@@ -380,10 +425,10 @@
     var Rr = RING_RADIUS_U * unitPx;
 
     // Positive angles are clockwise in canvas coordinates.
-    var sunAngle = OMEGA_SUN * t;
-    var ringAngle = OMEGA_RING * t;
-    var carrierAngle = OMEGA_CARRIER * t;
-    var planetSpinAngle = OMEGA_PLANET * t;
+    var sunAngle        = angles.sun;
+    var ringAngle       = angles.ring;
+    var carrierAngle    = angles.carrier;
+    var planetSpinAngle = angles.planet;
 
     // Planet center moves on the carrier radius.
     var px = Rc * Math.cos(carrierAngle);
