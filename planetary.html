@@ -331,6 +331,11 @@
 
   syncButtonStatesFromGearState();
 
+  window.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowLeft')  handleBindingPress(GearBinding.FIXED);
+    if (e.key === 'ArrowRight') handleBindingPress(GearBinding.DRIVEN);
+  });
+
   window.addEventListener('resize', function () {
     resizeCanvas();
   });
