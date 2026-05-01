@@ -218,6 +218,27 @@
 (function () {
   'use strict';
 
+  // This is a real-time defense game built around rotating circles, 
+  // presented as a stylized medieval cosmological orrery. Meteors appear 
+  // on an outer circle called the "Ring of Perdition" and slowly fall inward 
+  // toward an inner white circle called the "Wheel of Grace"; if they touch
+  // the Wheel of Grace, you take a hit. Your only defense is a rotating white
+  // wedge called the "Arc of Grace", attached to the inner Wheel of Grace
+  // and extending outward like a sweeping shield. When a meteor passes
+  // through that wedge, it is pushed back outward instead of continuing
+  // inward, and it only counts as safely cleared once it is forced all the way
+  // past an outermost boundary called the Ring of the Abyss. 
+  // 
+  // Under the theme, the system is mechanically a true planetary gear simulation,
+  // similar in principle to an automotive transmission. Earth, Sun, and Astral
+  // are the three coupled elements (albeit with the unconventional variant of
+  // having Earth be in the center and the Sun orbiting around it, to stay
+  // consistent with medieval cosmology). Changing which one is fixed, driven,
+  // or free changes the resulting output speed through gear ratios. As a result,
+  // playing well is partly about internalizing those ratio relationships so you
+  // can predict how each binding choice will reposition the Arc in time to
+  // intercept incoming meteors.
+
   const canvas       = document.getElementById('canvas');
   const ctx          = canvas.getContext('2d');
   const wrap         = document.getElementById('canvas-wrap');
@@ -324,7 +345,6 @@
   // Descent rate: 1 distance unit in 12 seconds (= 2 full driver revolutions).
   const GRACE_ARC_SPAN = (2 * Math.PI) / 12;
   const METEOR_DESCENT_RATE = 1 / 12; // units per second
-  const METEOR_EXPULSION_RATE = METEOR_DESCENT_RATE * 5;
   var meteorsImpact = 0;
   var meteorsRepelled = 0;
 
@@ -338,6 +358,18 @@
 
   var maxImpacts = readMaxFromQuery('maxImpacts');
   var maxRepels = readMaxFromQuery('maxRepels');
+
+  function readNumFromQuery(paramName, defaultVal) {
+    var raw = new URLSearchParams(window.location.search).get(paramName);
+    if (raw === null || raw === '') return defaultVal;
+    var parsed = Number(raw);
+    if (!Number.isFinite(parsed) || parsed <= 0) return defaultVal;
+    return parsed;
+  }
+
+  var meteorInterval = readNumFromQuery('meteorInterval', 10);
+  var repulsionForce = readNumFromQuery('repulsionForce', 5);
+  const METEOR_EXPULSION_RATE = METEOR_DESCENT_RATE * repulsionForce;
   var gameOver = false;
 
   function updateVictoryState() {
@@ -381,7 +413,6 @@
 
   var meteors = [newMeteor(angles.grace)];
   var meteorSpawnTimer = 0;
-  const METEOR_SPAWN_INTERVAL = 6; // seconds
 
   // ── helpers ───────────────────────────────────────────────────────────────
   function resizeCanvas() {
@@ -530,11 +561,11 @@
     var unboundKey = GEAR_OMEGA_KEY[findGearByBinding(GearBinding.UNBOUND)];
     angles.grace   += (omegas[unboundKey] || 0) * dt;
 
-    // Spawn a new meteor every METEOR_SPAWN_INTERVAL seconds until game over.
+    // Spawn a new meteor every meteorInterval seconds until game over.
     if (!gameOver) {
       meteorSpawnTimer += dt;
-      if (meteorSpawnTimer >= METEOR_SPAWN_INTERVAL) {
-        meteorSpawnTimer -= METEOR_SPAWN_INTERVAL;
+      if (meteorSpawnTimer >= meteorInterval) {
+        meteorSpawnTimer -= meteorInterval;
         meteors.push(newMeteor(angles.grace));
       }
     }
