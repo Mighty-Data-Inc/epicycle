@@ -64,6 +64,13 @@
       pointer-events: none;
     }
 
+    #resultBanner.boot-error {
+      border-color: #ff6b6b;
+      max-width: 92vw;
+      font-size: 1rem;
+      line-height: 1.4;
+    }
+
     #controls {
       background: #0d1117;
       border-left: 1px solid #222;
@@ -214,7 +221,16 @@
   </div>
 </div>
 
-<script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.178.0/build/three.module.js"
+  }
+}
+</script>
+<script type="module">
+  import * as THREE from 'three';
+
 (function () {
   'use strict';
 
@@ -240,7 +256,6 @@
   // intercept incoming meteors.
 
   const canvas       = document.getElementById('canvas');
-  const ctx          = canvas.getContext('2d');
   const wrap         = document.getElementById('canvas-wrap');
   const controls     = document.getElementById('controls');
   const valDrive     = document.getElementById('valDrive');
@@ -414,10 +429,167 @@
   var meteors = [newMeteor(angles.grace)];
   var meteorSpawnTimer = 0;
 
+  // ── rendering (three.js) ─────────────────────────────────────────────────
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x07090d);
+
+  const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.01, 100);
+  camera.position.set(0, 0, 20);
+  camera.lookAt(0, 0, 0);
+
+  const renderer = new THREE.WebGLRenderer({
+    canvas: canvas,
+    antialias: true,
+    alpha: false
+  });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+
+  const worldRoot = new THREE.Group();
+  scene.add(worldRoot);
+
+  function makeCirclePoints(radius, segments) {
+    var pts = [];
+    for (var i = 0; i <= segments; i++) {
+      var a = (i / segments) * Math.PI * 2;
+      pts.push(new THREE.Vector3(radius * Math.cos(a), radius * Math.sin(a), 0));
+    }
+    return pts;
+  }
+
+  function makeRingLine(radius, color, width) {
+    var geom = new THREE.BufferGeometry().setFromPoints(makeCirclePoints(radius, 128));
+    var mat = new THREE.LineBasicMaterial({ color: color, transparent: true, opacity: 1 });
+    var line = new THREE.LineLoop(geom, mat);
+    line.userData.baseOpacity = 1;
+    line.userData.lineWidth = width;
+    return line;
+  }
+
+  function makeDisk(radius, color) {
+    var geom = new THREE.CircleGeometry(radius, 64);
+    var mat = new THREE.MeshBasicMaterial({ color: color });
+    return new THREE.Mesh(geom, mat);
+  }
+
+  function makeWedge(innerR, outerR, arcSpan, color) {
+    var shape = new THREE.Shape();
+    shape.absarc(0, 0, outerR, 0, arcSpan, false);
+
+    var hole = new THREE.Path();
+    hole.absarc(0, 0, innerR, arcSpan, 0, true);
+    shape.holes.push(hole);
+
+    var geom = new THREE.ShapeGeometry(shape);
+    var mat = new THREE.MeshBasicMaterial({ color: color, side: THREE.DoubleSide });
+    return new THREE.Mesh(geom, mat);
+  }
+
+  function makeMarker(radius, color) {
+    var geom = new THREE.CircleGeometry(radius, 24);
+    var mat = new THREE.MeshBasicMaterial({ color: color });
+    return new THREE.Mesh(geom, mat);
+  }
+
+  var ringLine = makeRingLine(RING_RADIUS_U, 0x6b778f, 1.5);
+  ringLine.position.z = -0.02;
+  worldRoot.add(ringLine);
+
+  var perditionLine = makeRingLine(PERDITION_RADIUS_U, 0x8b0000, 1.5);
+  perditionLine.position.z = -0.06;
+  worldRoot.add(perditionLine);
+
+  var abyssLine = makeRingLine(ABYSS_RADIUS_U, 0x4d0000, 1.5);
+  abyssLine.position.z = -0.07;
+  worldRoot.add(abyssLine);
+
+  var carrierOrbit = makeRingLine(CARRIER_RADIUS_U, 0x6f839b, 1);
+  carrierOrbit.material.opacity = 0.45;
+  carrierOrbit.material.transparent = true;
+  carrierOrbit.position.z = -0.01;
+  worldRoot.add(carrierOrbit);
+
+  var graceGroup = new THREE.Group();
+  graceGroup.position.z = 0.02;
+  worldRoot.add(graceGroup);
+
+  var graceRing = makeRingLine(GRACE_RADIUS_U, 0xffffff, 1.5);
+  graceGroup.add(graceRing);
+
+  var graceWedge = makeWedge(GRACE_RADIUS_U, ABYSS_RADIUS_U, GRACE_ARC_SPAN, 0xffffff);
+  graceWedge.position.z = 0.01;
+  graceGroup.add(graceWedge);
+
+  var carrierLineGeom = new THREE.BufferGeometry();
+  var carrierLinePos = new Float32Array(6);
+  carrierLineGeom.setAttribute('position', new THREE.BufferAttribute(carrierLinePos, 3));
+  var carrierLine = new THREE.Line(
+    carrierLineGeom,
+    new THREE.LineBasicMaterial({ color: 0xb4cdeb, transparent: true, opacity: 0.7 })
+  );
+  carrierLine.position.z = 0.01;
+  worldRoot.add(carrierLine);
+
+  var earthMesh = makeDisk(EARTH_RADIUS_U, 0x1a4d1a);
+  earthMesh.position.z = 0.03;
+  worldRoot.add(earthMesh);
+
+  var earthOutline = makeRingLine(EARTH_RADIUS_U, 0x8f99aa, 1.5);
+  earthOutline.position.z = 0.04;
+  worldRoot.add(earthOutline);
+
+  var sunGroup = new THREE.Group();
+  sunGroup.position.z = 0.03;
+  worldRoot.add(sunGroup);
+
+  var sunMesh = makeDisk(SUN_RADIUS_U, 0xc49000);
+  sunGroup.add(sunMesh);
+
+  var sunOutline = makeRingLine(SUN_RADIUS_U, 0x8f99aa, 1.5);
+  sunOutline.position.z = 0.01;
+  sunGroup.add(sunOutline);
+
+  var earthMarker = makeMarker(0.05, 0x66ff88);
+  earthMarker.position.z = 0.1;
+  worldRoot.add(earthMarker);
+
+  var sunMarker = makeMarker(0.05, 0xffd84a);
+  sunMarker.position.z = 0.1;
+  worldRoot.add(sunMarker);
+
+  var ringMarker = makeMarker(0.05, 0xb56dff);
+  ringMarker.position.z = 0.1;
+  worldRoot.add(ringMarker);
+
+  var centerMarker = makeMarker(0.03, 0x999999);
+  centerMarker.position.z = 0.11;
+  worldRoot.add(centerMarker);
+
+  var sunCenterMarker = makeMarker(0.03, 0x999999);
+  sunCenterMarker.position.z = 0.11;
+  worldRoot.add(sunCenterMarker);
+
+  var meteorLayer = new THREE.Group();
+  meteorLayer.position.z = 0.2;
+  worldRoot.add(meteorLayer);
+
   // ── helpers ───────────────────────────────────────────────────────────────
   function resizeCanvas() {
-    canvas.width  = wrap.clientWidth;
-    canvas.height = wrap.clientHeight;
+    var w = Math.max(1, wrap.clientWidth);
+    var h = Math.max(1, wrap.clientHeight);
+
+    canvas.width = w;
+    canvas.height = h;
+
+    renderer.setSize(w, h, false);
+
+    var aspect = w / h;
+    var viewHeight = 9;
+    camera.left = -viewHeight * aspect * 0.5;
+    camera.right = viewHeight * aspect * 0.5;
+    camera.top = viewHeight * 0.5;
+    camera.bottom = -viewHeight * 0.5;
+    camera.updateProjectionMatrix();
+
     layoutControls();
   }
 
@@ -522,28 +694,26 @@
 
   resizeCanvas();
 
-  // ── tooth tick helper ─────────────────────────────────────────────────────
-  /**
-   * Draw evenly-spaced radial tick marks around a pitch circle.
-   * Call this with the canvas already translated to the gear's centre.
-   * @param {number} r      - pitch radius in px
-   * @param {number} teeth  - number of teeth (= number of ticks)
-   * @param {number} angle  - current rotation of the gear body (radians)
-   * @param {number} len    - tick length in px (positive = outward)
-   */
-  function drawTicks(r, teeth, angle, len) {
-    var step = (2 * Math.PI) / teeth;
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = '#aabbcc';
-    ctx.beginPath();
-    for (var i = 0; i < teeth; i++) {
-      var a = angle + i * step;
-      var cos = Math.cos(a);
-      var sin = Math.sin(a);
-      ctx.moveTo(r * cos, r * sin);
-      ctx.lineTo((r + len) * cos, (r + len) * sin);
+  function clearMeteorLayer() {
+    while (meteorLayer.children.length > 0) {
+      var child = meteorLayer.children[meteorLayer.children.length - 1];
+      meteorLayer.remove(child);
+      if (child.geometry) child.geometry.dispose();
+      if (child.material) child.material.dispose();
     }
-    ctx.stroke();
+  }
+
+  function pushMeteorMesh(x, y) {
+    var meteor = makeDisk(0.08, 0xff2200);
+    meteor.position.set(x, y, 0);
+    meteorLayer.add(meteor);
+  }
+
+  function applyBindingGlow(mesh, colorHex, active) {
+    if (!mesh || !mesh.material) return;
+    mesh.material.color.setHex(colorHex);
+    mesh.material.opacity = active ? 1 : 0.7;
+    mesh.material.transparent = true;
   }
 
   // ── draw loop ──────────────────────────────────────────────────────────────
@@ -594,18 +764,6 @@
     }
     meteors = survivors;
 
-    var W = canvas.width;
-    var H = canvas.height;
-    var unitPx = Math.min(W, H) * 0.10;
-
-    var Re = EARTH_RADIUS_U * unitPx;
-    var Rs = SUN_RADIUS_U * unitPx;
-    var Rc = CARRIER_RADIUS_U * unitPx;
-    var Rr = RING_RADIUS_U * unitPx;
-    var Ro = GRACE_RADIUS_U * unitPx;
-    var Rp2 = PERDITION_RADIUS_U * unitPx;
-    var Ra = ABYSS_RADIUS_U * unitPx;
-
     // Positive angles are clockwise in canvas coordinates.
     var earthAngle      = angles.earth;
     var ringAngle       = angles.ring;
@@ -623,194 +781,63 @@
     var isSunUnbound = gearState.Sun === GearBinding.UNBOUND;
 
     // Sun center moves on the carrier radius.
-    var sx = Rc * Math.cos(carrierAngle);
-    var sy = Rc * Math.sin(carrierAngle);
+    var sx = CARRIER_RADIUS_U * Math.cos(carrierAngle);
+    var sy = CARRIER_RADIUS_U * Math.sin(carrierAngle);
 
     // Sun 0deg marker rotates with the sun body.
-    var sunMarkX = sx + Rs * Math.cos(sunSpinAngle);
-    var sunMarkY = sy + Rs * Math.sin(sunSpinAngle);
-
+    var sunMarkX = sx + SUN_RADIUS_U * Math.cos(sunSpinAngle);
+    var sunMarkY = sy + SUN_RADIUS_U * Math.sin(sunSpinAngle);
 
     // ── render ──────────────────────────────────────────────────────────────
-    ctx.clearRect(0, 0, W, H);
-    ctx.save();
-    ctx.translate(W / 2, H / 2);
+    graceGroup.rotation.z = angles.grace;
+    ringLine.rotation.z = ringAngle;
+    carrierOrbit.rotation.z = carrierAngle;
+    earthMesh.rotation.z = earthAngle;
+    earthOutline.rotation.z = earthAngle;
 
-    // Wheel of Perdition — static dark purple boundary circle at the outer edge of the wedge.
-    ctx.beginPath();
-    ctx.arc(0, 0, Rp2, 0, 2 * Math.PI);
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = '#8b0000';
-    ctx.stroke();
+    sunGroup.position.set(sx, sy, sunGroup.position.z);
+    sunGroup.rotation.z = sunSpinAngle;
 
-    // Circle of the Abyss — stationary outer boundary, darker red than Perdition.
-    ctx.beginPath();
-    ctx.arc(0, 0, Ra, 0, 2 * Math.PI);
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = '#4d0000';
-    ctx.stroke();
+    carrierLinePos[0] = 0;
+    carrierLinePos[1] = 0;
+    carrierLinePos[2] = 0;
+    carrierLinePos[3] = sx;
+    carrierLinePos[4] = sy;
+    carrierLinePos[5] = 0;
+    carrierLineGeom.attributes.position.needsUpdate = true;
 
-    // Wheel of Grace — rotates at the speed of the free (unbound) gear.
-    ctx.save();
-    ctx.rotate(angles.grace);
-    ctx.beginPath();
-    ctx.arc(0, 0, Ro, 0, 2 * Math.PI);
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = '#ffffff';
-    ctx.stroke();
+    earthMarker.position.set(
+      EARTH_RADIUS_U * Math.cos(earthAngle),
+      EARTH_RADIUS_U * Math.sin(earthAngle),
+      earthMarker.position.z
+    );
+    sunMarker.position.set(sunMarkX, sunMarkY, sunMarker.position.z);
+    ringMarker.position.set(
+      RING_RADIUS_U * Math.cos(ringAngle),
+      RING_RADIUS_U * Math.sin(ringAngle),
+      ringMarker.position.z
+    );
+    sunCenterMarker.position.set(sx, sy, sunCenterMarker.position.z);
 
-    // Wedge projecting outward from 0deg mark of Wheel of Grace, 1/12 circle wide, to the Circle of the Abyss.
-    var wedgeOuter = Ra;
-    ctx.beginPath();
-    ctx.arc(0, 0, Ro, 0, GRACE_ARC_SPAN);
-    ctx.arc(0, 0, wedgeOuter, GRACE_ARC_SPAN, 0, true);
-    ctx.closePath();
-    ctx.fillStyle = '#ffffff';
-    ctx.fill();
-    ctx.restore();
-
-    // Meteors — bright red dots descending toward the Wheel of Grace.
-    // Drawn after Grace so overlap remains visible.
+    clearMeteorLayer();
     for (var mi = 0; mi < meteors.length; mi++) {
       var m = meteors[mi];
-      var meteorRpx = m.radius * unitPx;
-      var meteorX = meteorRpx * Math.cos(m.angle);
-      var meteorY = meteorRpx * Math.sin(m.angle);
-      ctx.beginPath();
-      ctx.arc(meteorX, meteorY, 6, 0, 2 * Math.PI);
-      ctx.fillStyle = '#ff2200';
-      ctx.fill();
+      var meteorX = m.radius * Math.cos(m.angle);
+      var meteorY = m.radius * Math.sin(m.angle);
+      pushMeteorMesh(meteorX, meteorY);
     }
 
-    // Ring gear (astral) shown as a single circle with an optional glow highlight behind it.
-    var ringGlow = isRingDriven ? 'rgba(0, 183, 255, 0.20)' :
-      (isRingFixed ? 'rgba(255, 176, 32, 0.20)' :
-        (isRingUnbound ? 'rgba(255, 255, 255, 0.55)' : null));
+    applyBindingGlow(ringLine, isRingDriven ? 0x00b7ff : (isRingFixed ? 0xffb020 : 0xffffff), true);
+    applyBindingGlow(carrierOrbit, isSunDriven ? 0x00b7ff : (isSunFixed ? 0xffb020 : 0xffffff), true);
+    applyBindingGlow(earthOutline, isEarthDriven ? 0x00b7ff : (isEarthFixed ? 0xffb020 : 0xffffff), true);
 
-    if (ringGlow) {
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(0, 0, Rr, 0, 2 * Math.PI);
-      ctx.lineWidth = 14;
-      ctx.shadowColor = ringGlow;
-      ctx.shadowBlur = 12;
-      ctx.strokeStyle = ringGlow;
-      ctx.stroke();
-      ctx.restore();
-    }
-    ctx.beginPath();
-    ctx.arc(0, 0, Rr, 0, 2 * Math.PI);
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = '#6b778f';
-    ctx.stroke();
-    drawTicks(Rr, RING_TEETH, ringAngle, -(Rr * 0.04)); // inward ticks
-
-    // Carrier arm.
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.lineTo(sx, sy);
-    ctx.strokeStyle = 'rgba(180, 205, 235, 0.7)';
-    ctx.lineWidth = 3;
-    ctx.stroke();
-
-    // Carrier circle (not a gear, but useful for visualizing carrier rotation).
-    var sunOrbitGlow = isSunDriven ? 'rgba(0, 183, 255, 0.20)' :
-      (isSunFixed ? 'rgba(255, 176, 32, 0.20)' :
-        (isSunUnbound ? 'rgba(255, 255, 255, 0.55)' : null));
-
-    if (sunOrbitGlow) {
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(0, 0, Rc, 0, 2 * Math.PI);
-      ctx.lineWidth = 13;
-      ctx.shadowColor = sunOrbitGlow;
-      ctx.shadowBlur = 11;
-      ctx.strokeStyle = sunOrbitGlow;
-      ctx.stroke();
-      ctx.restore();
-    }
-    ctx.beginPath();
-    ctx.arc(0, 0, Rc, 0, 2 * Math.PI);
-    ctx.strokeStyle = 'rgba(180, 205, 235, 0.35)';
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    drawTicks(Rc, EARTH_TEETH, carrierAngle, Rc * 0.06);
-
-    // Earth gear.
-    var earthGlow = isEarthDriven ? 'rgba(0, 183, 255, 0.20)' :
-      (isEarthFixed ? 'rgba(255, 176, 32, 0.20)' :
-        (isEarthUnbound ? 'rgba(255, 255, 255, 0.55)' : null));
-
-    if (earthGlow) {
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(0, 0, Re, 0, 2 * Math.PI);
-      ctx.lineWidth = 13;
-      ctx.shadowColor = earthGlow;
-      ctx.shadowBlur = 11;
-      ctx.strokeStyle = earthGlow;
-      ctx.stroke();
-      ctx.restore();
-    }
-    ctx.beginPath();
-    ctx.arc(0, 0, Re, 0, 2 * Math.PI);
-    ctx.fillStyle = '#1a4d1a'; // dark green (earth)
-    ctx.fill();
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = '#8f99aa';
-    ctx.stroke();
-    drawTicks(Re, EARTH_TEETH, earthAngle, Re * 0.12);
-
-    // Sun gear.
-    ctx.save();
-    ctx.translate(sx, sy);
-    ctx.beginPath();
-    ctx.arc(0, 0, Rs, 0, 2 * Math.PI);
-    ctx.fillStyle = '#c49000'; // dark orange (sun)
-    ctx.fill();
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = '#8f99aa';
-    ctx.stroke();
-    drawTicks(Rs, SUN_TEETH, sunSpinAngle, Rs * 0.12);
-    ctx.restore();
-
-    // 0deg marker dots for visible rotation state.
-    var earthMarkX = Re * Math.cos(earthAngle);
-    var earthMarkY = Re * Math.sin(earthAngle);
-    ctx.beginPath();
-    ctx.arc(earthMarkX, earthMarkY, 5, 0, 2 * Math.PI);
-    ctx.fillStyle = '#66ff88'; // green (earth)
-    ctx.fill();
-
-    ctx.beginPath();
-    ctx.arc(sunMarkX, sunMarkY, 5, 0, 2 * Math.PI);
-    ctx.fillStyle = '#ffd84a'; // yellow (sun)
-    ctx.fill();
-
-    var ringMarkX = Rr * Math.cos(ringAngle);
-    var ringMarkY = Rr * Math.sin(ringAngle);
-    ctx.beginPath();
-    ctx.arc(ringMarkX, ringMarkY, 5, 0, 2 * Math.PI);
-    ctx.fillStyle = '#b56dff'; // violet (astral ring)
-    ctx.fill();
-
-    // Centres.
-    ctx.beginPath();
-    ctx.arc(0, 0, 3, 0, 2 * Math.PI);
-    ctx.fillStyle = '#999';
-    ctx.fill();
-
-    ctx.beginPath();
-    ctx.arc(sx, sy, 3, 0, 2 * Math.PI);
-    ctx.fillStyle = '#999';
-    ctx.fill();
-
-    ctx.restore();
+    renderer.render(scene, camera);
 
     requestAnimationFrame(draw);
   }
 
   requestAnimationFrame(draw);
+
 }());
 </script>
 
