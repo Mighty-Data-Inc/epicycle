@@ -510,6 +510,8 @@
 
   var graceWedge = makeWedge(GRACE_RADIUS_U, ABYSS_RADIUS_U, GRACE_ARC_SPAN, 0xffffff);
   graceWedge.position.z = 0.01;
+  // Keep visible wedge aligned with collision interval after render-angle inversion.
+  graceWedge.rotation.z = -GRACE_ARC_SPAN;
   graceGroup.add(graceWedge);
 
   var carrierLineGeom = new THREE.BufferGeometry();
@@ -757,11 +759,14 @@
     }
     meteors = survivors;
 
-    // Positive angles are clockwise in canvas coordinates.
-    var earthAngle      = angles.earth;
-    var ringAngle       = angles.ring;
-    var carrierAngle    = angles.carrier;
-    var sunSpinAngle    = angles.sun;
+    // Simulation angles are defined in clockwise canvas convention.
+    // Three.js uses a y-up coordinate system where positive rotation is CCW,
+    // so render with inverted angles to preserve original visual direction.
+    var earthAngle      = -angles.earth;
+    var ringAngle       = -angles.ring;
+    var carrierAngle    = -angles.carrier;
+    var sunSpinAngle    = -angles.sun;
+    var graceAngle      = -angles.grace;
 
     var isEarthDriven = gearState.Earth === GearBinding.DRIVEN;
     var isRingDriven = gearState.Astral === GearBinding.DRIVEN;
@@ -782,7 +787,7 @@
     var sunMarkY = sy + SUN_RADIUS_U * Math.sin(sunSpinAngle);
 
     // ── render ──────────────────────────────────────────────────────────────
-    graceGroup.rotation.z = angles.grace;
+    graceGroup.rotation.z = graceAngle;
     ringLine.rotation.z = ringAngle;
     carrierOrbit.rotation.z = carrierAngle;
     earthMesh.rotation.z = earthAngle;
@@ -815,8 +820,9 @@
     clearMeteorLayer();
     for (var mi = 0; mi < meteors.length; mi++) {
       var m = meteors[mi];
-      var meteorX = m.radius * Math.cos(m.angle);
-      var meteorY = m.radius * Math.sin(m.angle);
+      var renderMeteorAngle = -m.angle;
+      var meteorX = m.radius * Math.cos(renderMeteorAngle);
+      var meteorY = m.radius * Math.sin(renderMeteorAngle);
       pushMeteorMesh(meteorX, meteorY);
     }
 
