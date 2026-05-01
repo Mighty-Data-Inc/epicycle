@@ -472,14 +472,7 @@
   }
 
   function makeWedge(innerR, outerR, arcSpan, color) {
-    var shape = new THREE.Shape();
-    shape.absarc(0, 0, outerR, 0, arcSpan, false);
-
-    var hole = new THREE.Path();
-    hole.absarc(0, 0, innerR, arcSpan, 0, true);
-    shape.holes.push(hole);
-
-    var geom = new THREE.ShapeGeometry(shape);
+    var geom = new THREE.RingGeometry(innerR, outerR, 64, 1, 0, arcSpan);
     var mat = new THREE.MeshBasicMaterial({ color: color, side: THREE.DoubleSide });
     return new THREE.Mesh(geom, mat);
   }
