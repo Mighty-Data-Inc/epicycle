@@ -673,9 +673,7 @@
   perditionLine.position.z = -0.06;
   worldRoot.add(perditionLine);
 
-  var abyssLine = makeRingLine(ABYSS_RADIUS_U, 0x4d0000, 1.5);
-  abyssLine.position.z = -0.07;
-  worldRoot.add(abyssLine);
+  // abyssLine is not rendered; ABYSS_RADIUS_U remains the functional expulsion boundary.
 
   var carrierOrbit = makeRingLine(CARRIER_RADIUS_U, 0x6f839b, 1);
   carrierOrbit.material.opacity = 0.45;
@@ -873,8 +871,10 @@
     }
   }
 
-  function pushMeteorMesh(x, y) {
-    var meteor = makeDisk(0.08, 0xff2200);
+  function pushMeteorMesh(x, y, opacity, colorHex) {
+    var meteor = makeDisk(0.08, colorHex);
+    meteor.material.transparent = true;
+    meteor.material.opacity = opacity;
     meteor.position.set(x, y, 0);
     meteorLayer.add(meteor);
   }
@@ -998,7 +998,22 @@
       var renderMeteorAngle = -m.angle;
       var meteorX = m.radius * Math.cos(renderMeteorAngle);
       var meteorY = m.radius * Math.sin(renderMeteorAngle);
-      pushMeteorMesh(meteorX, meteorY);
+
+      // Between Perdition and Abyss: fade to black and transparent.
+      var opacity, colorHex;
+      if (m.radius > PERDITION_RADIUS_U) {
+        var t = (m.radius - PERDITION_RADIUS_U) / (ABYSS_RADIUS_U - PERDITION_RADIUS_U);
+        t = Math.max(0, Math.min(1, t));
+        opacity = 1 - t;
+        var r = Math.floor(0xff * (1 - t));
+        var g = Math.floor(0x22 * (1 - t));
+        colorHex = (r << 16) | (g << 8);
+      } else {
+        opacity = 1;
+        colorHex = 0xff2200;
+      }
+
+      pushMeteorMesh(meteorX, meteorY, opacity, colorHex);
     }
 
     applyBindingGlow(ringLine, isRingDriven ? 0x00b7ff : (isRingFixed ? 0xffb020 : 0xffffff), true);
