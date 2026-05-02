@@ -614,8 +614,9 @@
   const scene = new THREE.Scene();
   scene.background = createLayeredNebulaTexture(THREE);
 
-  const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.01, 100);
-  camera.position.set(0, 0, 20);
+  const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 100);
+  var tiltRad = THREE.MathUtils.degToRad(45);
+  camera.position.set(0, -10 * Math.sin(tiltRad), 10 * Math.cos(tiltRad));
   camera.lookAt(0, 0, 0);
 
   const renderer = new THREE.WebGLRenderer({
@@ -758,11 +759,7 @@
     canvas.style.height = h + 'px';
 
     var aspect = w / h;
-    var viewHeight = 9;
-    camera.left = -viewHeight * aspect * 0.5;
-    camera.right = viewHeight * aspect * 0.5;
-    camera.top = viewHeight * 0.5;
-    camera.bottom = -viewHeight * 0.5;
+    camera.aspect = aspect;
     camera.updateProjectionMatrix();
   }
 
