@@ -298,7 +298,7 @@
   const SUN_RADIUS_U = SUN_DIAMETER * 0.5;
   const CARRIER_RADIUS_U = CARRIER_DIAMETER * 0.5;
   const RING_RADIUS_U = RING_DIAMETER * 0.5;
-  const GRACE_RADIUS_U = RING_RADIUS_U + 0.5; // 1 unit larger diameter than astral ring
+  const GRACE_RADIUS_U = RING_RADIUS_U + 0.25; // 0.5 units larger diameter than astral ring
   const PERDITION_RADIUS_U = GRACE_RADIUS_U + 1; // outer edge of the wedge
   const ABYSS_RADIUS_U = PERDITION_RADIUS_U + 0.5;
 
@@ -616,7 +616,7 @@
 
   const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 100);
   var tiltRad = THREE.MathUtils.degToRad(45);
-  camera.position.set(0, -10 * Math.sin(tiltRad), 10 * Math.cos(tiltRad));
+  camera.position.set(0, -7.5 * Math.sin(tiltRad), 7.5 * Math.cos(tiltRad));
   camera.lookAt(0, 0, 0);
 
   const renderer = new THREE.WebGLRenderer({
@@ -659,6 +659,13 @@
     return new THREE.Mesh(geom, mat);
   }
 
+  function makePuck(radius, height, color) {
+    var geom = new THREE.CylinderGeometry(radius, radius, height, 64);
+    geom.rotateX(Math.PI / 2); // align flat face to XY plane
+    var mat = new THREE.MeshBasicMaterial({ color: color });
+    return new THREE.Mesh(geom, mat);
+  }
+
   function makeMarker(radius, color) {
     var geom = new THREE.CircleGeometry(radius, 24);
     var mat = new THREE.MeshBasicMaterial({ color: color });
@@ -668,6 +675,24 @@
   var ringLine = makeRingLine(RING_RADIUS_U, 0x6b778f, 1.5);
   ringLine.position.z = -0.02;
   worldRoot.add(ringLine);
+
+  var ringFill = (function () {
+    var shape = new THREE.Shape();
+    shape.absarc(0, 0, RING_RADIUS_U + 0.15, 0, Math.PI * 2, false);
+    var hole = new THREE.Path();
+    hole.absarc(0, 0, RING_RADIUS_U, 0, Math.PI * 2, true);
+    shape.holes.push(hole);
+    var geom = new THREE.ExtrudeGeometry(shape, { depth: 0.18, bevelEnabled: false });
+    geom.translate(0, 0, -0.09); // center depth around z=0
+    var mat = new THREE.MeshBasicMaterial({ color: 0x6b778f, side: THREE.DoubleSide });
+    return new THREE.Mesh(geom, mat);
+  }());
+  ringFill.position.z = -0.03;
+  worldRoot.add(ringFill);
+
+  var ringLineOuter = makeRingLine(RING_RADIUS_U + 0.15, 0x6b778f, 1.5);
+  ringLineOuter.position.z = -0.02;
+  worldRoot.add(ringLineOuter);
 
   var perditionLine = makeRingLine(PERDITION_RADIUS_U, 0x8b0000, 1.5);
   perditionLine.position.z = -0.06;
@@ -685,10 +710,62 @@
   graceGroup.position.z = 0.02;
   worldRoot.add(graceGroup);
 
-  var graceRing = makeRingLine(GRACE_RADIUS_U, 0xffffff, 1.5);
+  var graceRing = new THREE.Mesh(
+    new THREE.TorusGeometry(GRACE_RADIUS_U, 0.09, 16, 128),
+    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.45 })
+  );
   graceGroup.add(graceRing);
 
-  var graceWedge = makeWedge(GRACE_RADIUS_U, ABYSS_RADIUS_U, GRACE_ARC_SPAN, 0xffffff);
+  var graceWedge = (function () {
+    var geom = new THREE.RingGeometry(GRACE_RADIUS_U, ABYSS_RADIUS_U, 64, 12, 0, GRACE_ARC_SPAN);
+    var mat = new THREE.ShaderMaterial({
+      transparent: true,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      uniforms: {
+        innerR: { value: GRACE_RADIUS_U },
+        outerR: { value: ABYSS_RADIUS_U },
+        arcSpan: { value: GRACE_ARC_SPAN },
+        time: { value: 0.0 }
+      },
+      vertexShader: [
+        'varying vec3 vPos;',
+        'void main() {',
+        '  vPos = position;',
+        '  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);',
+        '}'
+      ].join('\n'),
+      fragmentShader: [
+        'uniform float innerR;',
+        'uniform float outerR;',
+        'uniform float arcSpan;',
+        'uniform float time;',
+        'varying vec3 vPos;',
+        'float hash(float n) { return fract(sin(n) * 43758.5453123); }',
+        'float noise(float x) {',
+        '  float i = floor(x); float f = fract(x);',
+        '  float u = f * f * (3.0 - 2.0 * f);',
+        '  return mix(hash(i), hash(i + 1.0), u);',
+        '}',
+        'void main() {',
+        '  float r = length(vPos.xy);',
+        '  float radialT = clamp((r - innerR) / (outerR - innerR), 0.0, 1.0);',
+        '  float angle = atan(vPos.y, vPos.x);',
+        '  if (angle < 0.0) angle += 6.28318530718;',
+        '  float angularT = clamp(min(angle, arcSpan - angle) / (arcSpan * 0.12), 0.0, 1.0);',
+        '  // Shimmer: layered noise along the radial axis, drifting over time',
+        '  float shimmer = 0.5 + 0.5 * noise(r * 6.0 - time * 2.2);',
+        '  shimmer *= 0.5 + 0.5 * noise(r * 13.0 - time * 3.7);',
+        '  // Pulse: slow breathing of overall brightness',
+        '  float pulse = 0.82 + 0.18 * sin(time * 1.4);',
+        '  float alpha = (1.0 - radialT) * angularT * shimmer * pulse * 0.85;',
+        '  float warmth = 0.88 + 0.12 * shimmer;',
+        '  gl_FragColor = vec4(1.0, warmth, 0.82, alpha);',
+        '}'
+      ].join('\n')
+    });
+    return new THREE.Mesh(geom, mat);
+  }());
   graceWedge.position.z = 0.01;
   // Keep visible wedge aligned with collision interval after render-angle inversion.
   graceWedge.rotation.z = -GRACE_ARC_SPAN;
@@ -704,7 +781,7 @@
   carrierLine.position.z = 0.01;
   worldRoot.add(carrierLine);
 
-  var earthMesh = makeDisk(EARTH_RADIUS_U, 0x1a4d1a);
+  var earthMesh = makePuck(EARTH_RADIUS_U, 0.18, 0x1a4d1a);
   earthMesh.position.z = 0.03;
   worldRoot.add(earthMesh);
 
@@ -716,7 +793,7 @@
   sunGroup.position.z = 0.03;
   worldRoot.add(sunGroup);
 
-  var sunMesh = makeDisk(SUN_RADIUS_U, 0xc49000);
+  var sunMesh = makePuck(SUN_RADIUS_U, 0.18, 0xc49000);
   sunGroup.add(sunMesh);
 
   var sunOutline = makeRingLine(SUN_RADIUS_U, 0x8f99aa, 1.5);
@@ -1019,6 +1096,8 @@
     applyBindingGlow(ringLine, isRingDriven ? 0x00b7ff : (isRingFixed ? 0xffb020 : 0xffffff), true);
     applyBindingGlow(carrierOrbit, isSunDriven ? 0x00b7ff : (isSunFixed ? 0xffb020 : 0xffffff), true);
     applyBindingGlow(earthOutline, isEarthDriven ? 0x00b7ff : (isEarthFixed ? 0xffb020 : 0xffffff), true);
+
+    graceWedge.material.uniforms.time.value = timestamp / 1000.0;
 
     renderer.render(scene, camera);
 
