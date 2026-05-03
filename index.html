@@ -423,7 +423,9 @@
     return {
       angle: graceAngle + offset,
       omega: (Math.random() * 0.75 - 0.25) * 2 * Math.PI, // [-0.25, +0.5] rev/s in rad/s
-      radius: PERDITION_RADIUS_U
+      radius: PERDITION_RADIUS_U,
+      seed: Math.random() * 1000.0,
+      age: 0
     };
   }
 
@@ -978,7 +980,8 @@
   var meteorPool = [];
   const METEOR_RADIUS_U = 0.1;
   var meteorGeometry = new THREE.SphereGeometry(METEOR_RADIUS_U, 24, 24);
-  var meteorDiscGeometry = new THREE.CircleGeometry(METEOR_RADIUS_U * 3, 40);
+  var meteorDiscGeometry      = new THREE.CircleGeometry(METEOR_RADIUS_U * 5.0, 40);
+  var meteorDiscBlackGeometry  = new THREE.CircleGeometry(METEOR_RADIUS_U * 2.5, 32);
   var meteorDiscVertexShader = [
     'varying vec2 vUv;',
     'void main() {',
@@ -990,7 +993,7 @@
     'uniform float time;',
     'uniform float opacity;',
     'uniform float seed;',
-    'uniform float coreGlow;',
+    'uniform vec3 baseColor;',
     'varying vec2 vUv;',
     'float hash(vec2 p) {',
     '  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);',
@@ -1019,25 +1022,17 @@
     '  vec2 p = (vUv - 0.5) * 2.0;',
     '  float r = length(p);',
     '  if (r > 1.0) discard;',
-    '  vec2 flow = vec2(time * 0.16, -time * 0.13) + vec2(seed * 13.7, seed * 5.1);',
+    '  vec2 flow = vec2(time * 0.36, -time * 0.31) + vec2(seed * 13.7, seed * 5.1);',
     '  float n1 = fbm(p * 2.1 + flow);',
     '  float n2 = fbm(p * 4.0 - flow * 1.3 + 9.2);',
     '  float wisps = smoothstep(0.42, 0.86, n1 * 0.7 + n2 * 0.3);',
     '  float radial = smoothstep(1.0, 0.2, r);',
     '  float edgeFade = smoothstep(1.0, 0.55, r);',
     '  float centerFill = smoothstep(0.55, 0.0, r);',
-    '  float a = opacity * (1.45 * wisps * radial * edgeFade + 0.85 * centerFill);',
+    '  float intensity = wisps * radial * edgeFade + 0.6 * centerFill;',
+    '  float a = opacity * intensity;',
     '  if (a < 0.003) discard;',
-    '  float soot = smoothstep(0.58, 0.9, n2) * (1.0 - wisps) * 0.9;',
-    '  float yellowHot = smoothstep(0.76, 0.95, n1) * wisps;',
-    '  vec3 col = mix(vec3(0.32, 0.03, 0.03), vec3(1.0, 0.20, 0.06), wisps);',
-    '  col = mix(col, vec3(0.03, 0.01, 0.01), soot);',
-    '  col += vec3(1.0, 0.90, 0.18) * yellowHot * 0.6;',
-    '  float core = pow(max(0.0, 1.0 - r), 2.4);',
-    '  float emit = coreGlow * (0.35 + 0.65 * wisps) * core;',
-    '  col += vec3(1.0, 0.42, 0.10) * emit * 0.9;',
-    '  a = max(a, opacity * emit * 0.35);',
-    '  col = min(col, vec3(1.0));',
+    '  vec3 col = mix(baseColor * 0.18, baseColor, wisps);',
     '  gl_FragColor = vec4(col, a);',
     '}'
   ].join('\n');
@@ -1054,6 +1049,8 @@
     'uniform float baseG;',
     'uniform float opacity;',
     'uniform float heat;',
+    'uniform float grace;',
+    'uniform vec3 graceDir;',
     'varying vec3 vN;',
     // hash / value noise helpers
     'vec3 hash3(vec3 p) {',
@@ -1106,6 +1103,12 @@
     '  spec *= smoothstep(0.05, 0.85, vN.z) * 0.22;',
     '  col += vec3(1.0, 0.9, 0.2) * spec;',
     '  col += vec3(1.0, 0.9, 0.2) * sparkMask * 0.75;',
+    // grace arc illumination: directional silver-blue from arc side
+    '  float gracePulse = 0.85 + 0.15 * sin(time * 4.0);',
+    '  vec3 gd = normalize(graceDir);',
+    '  float graceDiff = max(0.0, dot(normalize(vN), gd));',
+    '  float graceSpec = pow(graceDiff, 12.0);',
+    '  col += grace * gracePulse * vec3(0.55, 0.80, 1.0) * (graceDiff * 1.4 + graceSpec * 0.8);',
     '  col = min(col, vec3(1.0));',
     '  gl_FragColor = vec4(col, opacity);',
     '}'
@@ -1116,26 +1119,28 @@
       transparent: true,
       depthWrite: false,
       uniforms: {
-        time:    { value: 0 },
-        baseR:   { value: 1 },
-        baseG:   { value: 0.1333333333 },
-        opacity: { value: 1 },
-        heat:    { value: 0 }
+        time:     { value: 0 },
+        baseR:    { value: 1 },
+        baseG:    { value: 0.1333333333 },
+        opacity:  { value: 1 },
+        heat:     { value: 0 },
+        grace:    { value: 0 },
+        graceDir: { value: new THREE.Vector3(0, 1, 0) }
       },
       vertexShader: meteorVertexShader,
       fragmentShader: meteorFragmentShader
     });
   }
 
-  function createMeteorDiscMaterial(seed) {
+  function createMeteorDiscMaterial(seed, cr, cg, cb) {
     return new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
       uniforms: {
-        time: { value: 0 },
-        opacity: { value: 1 },
-        seed: { value: seed },
-        coreGlow: { value: 1 }
+        time:      { value: 0 },
+        opacity:   { value: 1 },
+        seed:      { value: seed },
+        baseColor: { value: new THREE.Vector3(cr, cg, cb) }
       },
       vertexShader: meteorDiscVertexShader,
       fragmentShader: meteorDiscFragmentShader
@@ -1144,32 +1149,42 @@
 
   function initMeteorPool() {
     for (var i = 0; i < MAX_METEOR_RENDER; i++) {
-      var disc = new THREE.Mesh(
-        meteorDiscGeometry,
-        createMeteorDiscMaterial((i + 1) * 0.173)
-      );
-      disc.visible = false;
-      meteorLayer.add(disc);
+      var baseSeed = (i + 1) * 0.173;
+      var discYellow = new THREE.Mesh(meteorDiscGeometry,
+        createMeteorDiscMaterial(baseSeed,          1.00, 0.72, 0.00));
+      discYellow.visible = false;
+      meteorLayer.add(discYellow);
+
+      var discRed = new THREE.Mesh(meteorDiscGeometry,
+        createMeteorDiscMaterial(baseSeed + 17.3,   0.85, 0.05, 0.00));
+      discRed.visible = false;
+      meteorLayer.add(discRed);
+
+      var discBlack = new THREE.Mesh(meteorDiscBlackGeometry,
+        createMeteorDiscMaterial(baseSeed + 31.7,   0.04, 0.01, 0.01));
+      discBlack.visible = false;
+      meteorLayer.add(discBlack);
 
       var meteor = new THREE.Mesh(meteorGeometry, createMeteorMaterial());
       meteor.visible = false;
       meteorLayer.add(meteor);
-      meteorPool.push({ meteor: meteor, disc: disc });
+      meteorPool.push({ meteor: meteor, discBlack: discBlack, discRed: discRed, discYellow: discYellow });
     }
   }
 
   function clearMeteorLayer() {
     for (var i = 0; i < meteorPool.length; i++) {
       meteorPool[i].meteor.visible = false;
-      meteorPool[i].disc.visible = false;
+      meteorPool[i].discBlack.visible  = false;
+      meteorPool[i].discRed.visible    = false;
+      meteorPool[i].discYellow.visible = false;
     }
   }
 
-  function pushMeteorMesh(poolIndex, x, y, opacity, colorHex, t, heat) {
+  function pushMeteorMesh(poolIndex, x, y, opacity, colorHex, t, heat, seed, grace, graceDirX, graceDirY) {
     if (poolIndex < 0 || poolIndex >= meteorPool.length) return;
     var slot = meteorPool[poolIndex];
     var meteor = slot.meteor;
-    var disc = slot.disc;
     var r = ((colorHex >> 16) & 0xff) / 255;
     var g = ((colorHex >> 8) & 0xff) / 255;
     var uniforms = meteor.material.uniforms;
@@ -1178,15 +1193,21 @@
     uniforms.baseG.value = g;
     uniforms.opacity.value = opacity;
     uniforms.heat.value = heat || 0;
+    uniforms.grace.value = grace || 0;
+    uniforms.graceDir.value.set(graceDirX || 0, graceDirY || 0, 0.25).normalize();
     meteor.position.set(x, y, 0);
     meteor.visible = true;
 
-    disc.position.set(x, y, -0.01);
-    var discUniforms = disc.material.uniforms;
-    discUniforms.time.value = t;
-    discUniforms.opacity.value = Math.max(0, Math.min(1, opacity));
-    discUniforms.coreGlow.value = Math.max(0, Math.min(1, (r * 0.85 + g * 0.15) * opacity));
-    disc.visible = true;
+    var setDisc = function(disc, zOff, op, s) {
+      disc.position.set(x, y, zOff);
+      disc.material.uniforms.time.value = t;
+      disc.material.uniforms.opacity.value = Math.max(0, Math.min(1, op));
+      if (s !== undefined) disc.material.uniforms.seed.value = s;
+      disc.visible = true;
+    };
+    setDisc(slot.discBlack,  -0.01, opacity * 0.65, seed);
+    setDisc(slot.discRed,    -0.02, opacity * 0.85, seed !== undefined ? seed + 17.3 : undefined);
+    setDisc(slot.discYellow, -0.03, opacity * 0.80, seed !== undefined ? seed + 31.7 : undefined);
   }
 
   initMeteorPool();
@@ -1226,6 +1247,7 @@
     var survivors = [];
     for (var i = 0; i < meteors.length; i++) {
       var m = meteors[i];
+      m.age = (m.age || 0) + dt;
       m.angle += m.omega * dt;
       if (isInGraceArc(m.angle, angles.grace)) {
         m.radius += METEOR_EXPULSION_RATE * dt;
@@ -1325,8 +1347,14 @@
         colorHex = 0xff2200;
       }
       var heat = Math.max(0, Math.min(1, 1 - (m.radius - GRACE_RADIUS_U) / (PERDITION_RADIUS_U - GRACE_RADIUS_U)));
+      var grace = isInGraceArc(m.angle, angles.grace) ? 1 : 0;
+      var graceCx = GRACE_RADIUS_U * Math.cos(graceAngle);
+      var graceCy = GRACE_RADIUS_U * Math.sin(graceAngle);
+      var gdx = graceCx - meteorX, gdy = graceCy - meteorY;
+      var gdLen = Math.sqrt(gdx * gdx + gdy * gdy) || 1;
+      gdx /= gdLen; gdy /= gdLen;
 
-      pushMeteorMesh(mi, meteorX, meteorY, opacity, colorHex, timestamp / 1000.0, heat);
+      pushMeteorMesh(mi, meteorX, meteorY, opacity, colorHex, m.age || 0, heat, m.seed, grace, gdx, gdy);
     }
 
     applyBindingGlow(ringLine, isRingDriven ? 0x00b7ff : (isRingFixed ? 0xffb020 : 0xffffff), true);
