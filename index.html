@@ -979,6 +979,7 @@
 
   var meteorPool = [];
   const METEOR_RADIUS_U = 0.1;
+  const N_SPARKS = 32;
   var meteorGeometry = new THREE.SphereGeometry(METEOR_RADIUS_U, 24, 24);
   var meteorDiscGeometry      = new THREE.CircleGeometry(METEOR_RADIUS_U * 5.0, 40);
   var meteorDiscBlackGeometry  = new THREE.CircleGeometry(METEOR_RADIUS_U * 2.5, 32);
@@ -1168,7 +1169,21 @@
       var meteor = new THREE.Mesh(meteorGeometry, createMeteorMaterial());
       meteor.visible = false;
       meteorLayer.add(meteor);
-      meteorPool.push({ meteor: meteor, discBlack: discBlack, discRed: discRed, discYellow: discYellow });
+
+      // Spark streak LineSegments: N_SPARKS segments = N_SPARKS*2 verts
+      var spkPosArr = new Float32Array(N_SPARKS * 6); // 2 verts * xyz
+      var spkColArr = new Float32Array(N_SPARKS * 6);
+      var spkGeom = new THREE.BufferGeometry();
+      spkGeom.setAttribute('position', new THREE.BufferAttribute(spkPosArr, 3));
+      spkGeom.setAttribute('color',    new THREE.BufferAttribute(spkColArr, 3));
+      var sparks = new THREE.LineSegments(spkGeom,
+        new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false }));
+      sparks.visible = false;
+      meteorLayer.add(sparks);
+      var sparkState = [];
+      for (var j = 0; j < N_SPARKS; j++) sparkState.push({ alive: false, life: 0, maxLife: 1, p0x: 0, p0y: 0, p1x: 0, p1y: 0, vx: 0, vy: 0 });
+
+      meteorPool.push({ meteor: meteor, discBlack: discBlack, discRed: discRed, discYellow: discYellow, sparks: sparks, sparkState: sparkState });
     }
   }
 
@@ -1178,10 +1193,11 @@
       meteorPool[i].discBlack.visible  = false;
       meteorPool[i].discRed.visible    = false;
       meteorPool[i].discYellow.visible = false;
+      meteorPool[i].sparks.visible     = false;
     }
   }
 
-  function pushMeteorMesh(poolIndex, x, y, opacity, colorHex, t, heat, seed, grace, graceDirX, graceDirY) {
+  function pushMeteorMesh(poolIndex, x, y, opacity, colorHex, t, heat, seed, grace, graceDirX, graceDirY, dt) {
     if (poolIndex < 0 || poolIndex >= meteorPool.length) return;
     var slot = meteorPool[poolIndex];
     var meteor = slot.meteor;
@@ -1208,6 +1224,65 @@
     setDisc(slot.discBlack,  -0.01, opacity * 0.65, seed);
     setDisc(slot.discRed,    -0.02, opacity * 0.85, seed !== undefined ? seed + 17.3 : undefined);
     setDisc(slot.discYellow, -0.03, opacity * 0.80, seed !== undefined ? seed + 31.7 : undefined);
+
+    // ── spark streak simulation ──────────────────────────────────────────
+    var ss = slot.sparkState;
+    var posArr = slot.sparks.geometry.attributes.position.array;
+    var colArr = slot.sparks.geometry.attributes.color.array;
+    var adt = dt || 0.016;
+    var gx = graceDirX || 0, gy = graceDirY || 0;
+    for (var j = 0; j < N_SPARKS; j++) {
+      var s = ss[j];
+      var base = j * 6;
+      if (s.alive) {
+        s.life -= adt;
+        if (s.life <= 0) {
+          s.alive = false;
+        } else {
+          s.p0x += s.vx * adt;  s.p0y += s.vy * adt;
+          s.p1x += s.vx * adt;  s.p1y += s.vy * adt;
+          var f = s.life / s.maxLife; // 1=fresh → 0=dead
+          var hr = 1.0, hg = 0.65 + 0.35 * f, hb = 0.15 * f; // head: white→orange
+          var tr = 0.9 * f, tg = 0.3 * f, tb = 0.0;           // tail: orange→dark
+          posArr[base]   = s.p0x; posArr[base+1] = s.p0y; posArr[base+2] = 0.02;
+          posArr[base+3] = s.p1x; posArr[base+4] = s.p1y; posArr[base+5] = 0.02;
+          colArr[base]   = hr * f * opacity; colArr[base+1] = hg * f * opacity; colArr[base+2] = hb * opacity;
+          colArr[base+3] = tr * opacity;     colArr[base+4] = tg * opacity;     colArr[base+5] = tb;
+        }
+      }
+      if (!s.alive) {
+        if (grace > 0 && Math.random() < 0.18) {
+          // spawn: on sphere surface, velocity biased away from arc
+          s.alive = true;
+          s.maxLife = 0.15 + Math.random() * 0.30;
+          s.life = s.maxLife;
+          var spAngle = Math.random() * Math.PI * 2;
+          var spx = METEOR_RADIUS_U * Math.cos(spAngle);
+          var spy = METEOR_RADIUS_U * Math.sin(spAngle);
+          s.p0x = x + spx;  s.p0y = y + spy;
+          // velocity: outward from sphere, biased away from arc (against graceDir)
+          var dvx = spx - gx * 0.6, dvy = spy - gy * 0.6;
+          var dlen = Math.sqrt(dvx * dvx + dvy * dvy) || 1;
+          var spd = 0.35 + Math.random() * 0.65;
+          s.vx = dvx / dlen * spd;
+          s.vy = dvy / dlen * spd;
+          // tail is behind head by one-frame step
+          var tailLen = 0.045;
+          s.p1x = s.p0x - s.vx * tailLen;
+          s.p1y = s.p0y - s.vy * tailLen;
+        } else {
+          // collapse dead segment to zero-size at meteor center (invisible)
+          posArr[base]   = posArr[base+3] = x;
+          posArr[base+1] = posArr[base+4] = y;
+          posArr[base+2] = posArr[base+5] = 0.02;
+          colArr[base]   = colArr[base+1] = colArr[base+2] = 0;
+          colArr[base+3] = colArr[base+4] = colArr[base+5] = 0;
+        }
+      }
+    }
+    slot.sparks.geometry.attributes.position.needsUpdate = true;
+    slot.sparks.geometry.attributes.color.needsUpdate = true;
+    slot.sparks.visible = true;
   }
 
   initMeteorPool();
@@ -1354,7 +1429,7 @@
       var gdLen = Math.sqrt(gdx * gdx + gdy * gdy) || 1;
       gdx /= gdLen; gdy /= gdLen;
 
-      pushMeteorMesh(mi, meteorX, meteorY, opacity, colorHex, m.age || 0, heat, m.seed, grace, gdx, gdy);
+      pushMeteorMesh(mi, meteorX, meteorY, opacity, colorHex, m.age || 0, heat, m.seed, grace, gdx, gdy, dt);
     }
 
     applyBindingGlow(ringLine, isRingDriven ? 0x00b7ff : (isRingFixed ? 0xffb020 : 0xffffff), true);
