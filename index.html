@@ -698,10 +698,7 @@
   ringLineOuter.position.z = 0;
   worldRoot.add(ringLineOuter);
 
-  var perditionLine = makeRingLine(PERDITION_RADIUS_U, 0x8b0000, 1.5);
-  perditionLine.position.z = 0;
-  worldRoot.add(perditionLine);
-
+  // perditionLine not rendered; PERDITION_RADIUS_U remains a functional boundary.
   // abyssLine is not rendered; ABYSS_RADIUS_U remains the functional expulsion boundary.
 
   var carrierOrbit = makeRingLine(CARRIER_RADIUS_U, 0x6f839b, 1);
@@ -1151,10 +1148,6 @@
   function initMeteorPool() {
     for (var i = 0; i < MAX_METEOR_RENDER; i++) {
       var baseSeed = (i + 1) * 0.173;
-      var discYellow = new THREE.Mesh(meteorDiscGeometry,
-        createMeteorDiscMaterial(baseSeed,          1.00, 0.72, 0.00));
-      discYellow.visible = false;
-      meteorLayer.add(discYellow);
 
       var discRed = new THREE.Mesh(meteorDiscGeometry,
         createMeteorDiscMaterial(baseSeed + 17.3,   0.85, 0.05, 0.00));
@@ -1183,7 +1176,7 @@
       var sparkState = [];
       for (var j = 0; j < N_SPARKS; j++) sparkState.push({ alive: false, life: 0, maxLife: 1, p0x: 0, p0y: 0, p1x: 0, p1y: 0, vx: 0, vy: 0 });
 
-      meteorPool.push({ meteor: meteor, discBlack: discBlack, discRed: discRed, discYellow: discYellow, sparks: sparks, sparkState: sparkState });
+      meteorPool.push({ meteor: meteor, discBlack: discBlack, discRed: discRed, sparks: sparks, sparkState: sparkState });
     }
   }
 
@@ -1192,7 +1185,6 @@
       meteorPool[i].meteor.visible = false;
       meteorPool[i].discBlack.visible  = false;
       meteorPool[i].discRed.visible    = false;
-      meteorPool[i].discYellow.visible = false;
       meteorPool[i].sparks.visible     = false;
     }
   }
@@ -1223,7 +1215,6 @@
     };
     setDisc(slot.discBlack,  -0.01, opacity * 0.65, seed);
     setDisc(slot.discRed,    -0.02, opacity * 0.85, seed !== undefined ? seed + 17.3 : undefined);
-    setDisc(slot.discYellow, -0.03, opacity * 0.80, seed !== undefined ? seed + 31.7 : undefined);
 
     // ── spark streak simulation ──────────────────────────────────────────
     var ss = slot.sparkState;
