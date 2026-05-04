@@ -725,7 +725,8 @@
     uniforms: {
       radius:  { value: GRACE_RADIUS_U },
       offset:  { value: new THREE.Vector2(crescentOx, crescentOy) },
-      soft:    { value: 0.008 }
+      soft:    { value: 0.008 },
+      time:    { value: 0.0 }
     },
     vertexShader: `
       varying vec2 vPos;
@@ -738,13 +739,52 @@
       uniform float radius;
       uniform vec2  offset;
       uniform float soft;
+      uniform float time;
       varying vec2 vPos;
+      float hash(vec2 p) {
+        return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+      }
+      float noise(vec2 p) {
+        vec2 i = floor(p);
+        vec2 f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+        float a = hash(i + vec2(0.0, 0.0));
+        float b = hash(i + vec2(1.0, 0.0));
+        float c = hash(i + vec2(0.0, 1.0));
+        float d = hash(i + vec2(1.0, 1.0));
+        return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+      }
+      float fbm(vec2 p) {
+        float v = 0.0;
+        float a = 0.5;
+        for (int i = 0; i < 4; i++) {
+          v += a * noise(p);
+          p = p * 2.03 + vec2(11.3, 7.1);
+          a *= 0.52;
+        }
+        return v;
+      }
       void main() {
         float d1 = length(vPos);
-        float d2 = length(vPos - offset);
-        float inside1  = smoothstep(radius + soft, radius - soft, d1);
-        float outside2 = smoothstep(radius - soft, radius + soft, d2);
-        float alpha = inside1 * outside2;
+        if (d1 > radius + soft) discard;
+
+        float inside1 = smoothstep(radius + soft, radius - soft, d1);
+        float rNorm = clamp(d1 / radius, 0.0, 1.0);
+        float ang = atan(vPos.y, vPos.x);
+        float ang01 = (ang + 3.14159265359) / 6.28318530718;
+
+        // Opaque outer band that anchors the ring visually.
+        float rimSolid = smoothstep(0.92, 0.985, rNorm);
+
+        // Wisps flow inward from the rim, with animated directional noise.
+        vec2 flow = vec2(ang01 * 26.0 + time * 0.35, (1.0 - rNorm) * 11.0 - time * 2.4);
+        float n1 = fbm(flow);
+        float n2 = fbm(flow * vec2(1.8, 0.75) + vec2(5.7, -3.1));
+        float streaks = smoothstep(0.46, 0.9, n1 * 0.68 + n2 * 0.52);
+        float inwardFalloff = pow(rNorm, 4.2) * smoothstep(0.72, 0.985, rNorm);
+        float tendrils = streaks * inwardFalloff;
+
+        float alpha = inside1 * clamp(rimSolid + (0.78 * tendrils), 0.0, 1.0);
         if (alpha < 0.001) discard;
         gl_FragColor = vec4(1.0, 1.0, 1.0, alpha);
       }
@@ -754,13 +794,13 @@
   graceGroup.add(crescentMesh);
 
   var graceWedge = (function () {
-    var geom = new THREE.RingGeometry(GRACE_RADIUS_U, ABYSS_RADIUS_U, 64, 12, 0, GRACE_ARC_SPAN);
+    var geom = new THREE.RingGeometry(GRACE_RADIUS_U - 0.05, ABYSS_RADIUS_U, 64, 12, 0, GRACE_ARC_SPAN);
     var mat = new THREE.ShaderMaterial({
       transparent: true,
       side: THREE.DoubleSide,
       depthWrite: false,
       uniforms: {
-        innerR: { value: GRACE_RADIUS_U },
+        innerR: { value: GRACE_RADIUS_U - 0.05 },
         outerR: { value: ABYSS_RADIUS_U },
         arcSpan: { value: GRACE_ARC_SPAN },
         time: { value: 0.0 }
@@ -778,26 +818,45 @@
         'uniform float arcSpan;',
         'uniform float time;',
         'varying vec3 vPos;',
-        'float hash(float n) { return fract(sin(n) * 43758.5453123); }',
-        'float noise(float x) {',
-        '  float i = floor(x); float f = fract(x);',
-        '  float u = f * f * (3.0 - 2.0 * f);',
-        '  return mix(hash(i), hash(i + 1.0), u);',
+        'float hash(vec2 p) {',
+        '  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);',
+        '}',
+        'float noise(vec2 p) {',
+        '  vec2 i = floor(p);',
+        '  vec2 f = fract(p);',
+        '  f = f * f * (3.0 - 2.0 * f);',
+        '  float a = hash(i + vec2(0.0, 0.0));',
+        '  float b = hash(i + vec2(1.0, 0.0));',
+        '  float c = hash(i + vec2(0.0, 1.0));',
+        '  float d = hash(i + vec2(1.0, 1.0));',
+        '  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);',
+        '}',
+        'float fbm(vec2 p) {',
+        '  float v = 0.0;',
+        '  float a = 0.5;',
+        '  for (int i = 0; i < 4; i++) {',
+        '    v += a * noise(p);',
+        '    p = p * 2.03 + vec2(17.3, 5.9);',
+        '    a *= 0.52;',
+        '  }',
+        '  return v;',
         '}',
         'void main() {',
         '  float r = length(vPos.xy);',
         '  float radialT = clamp((r - innerR) / (outerR - innerR), 0.0, 1.0);',
         '  float angle = atan(vPos.y, vPos.x);',
         '  if (angle < 0.0) angle += 6.28318530718;',
-        '  float angularT = clamp(min(angle, arcSpan - angle) / (arcSpan * 0.12), 0.0, 1.0);',
-        '  // Shimmer: layered noise along the radial axis, drifting over time',
-        '  float shimmer = 0.5 + 0.5 * noise(r * 6.0 - time * 2.2);',
-        '  shimmer *= 0.5 + 0.5 * noise(r * 13.0 - time * 3.7);',
-        '  // Pulse: slow breathing of overall brightness',
-        '  float pulse = 0.82 + 0.18 * sin(time * 1.4);',
-        '  float alpha = (1.0 - radialT) * angularT * shimmer * pulse * 0.85;',
-        '  float warmth = 0.88 + 0.12 * shimmer;',
-        '  gl_FragColor = vec4(1.0, warmth, 0.82, alpha);',
+        '  float angEdge = clamp(min(angle, arcSpan - angle) / (arcSpan * 0.10), 0.0, 1.0);',
+        '  float alongArc = clamp(angle / max(arcSpan, 0.0001), 0.0, 1.0);',
+        '  vec2 flow = vec2(alongArc * 14.0 + time * 0.35, (1.0 - radialT) * 6.0 + time * 2.5);',
+        '  float n1 = fbm(flow);',
+        '  float n2 = fbm(flow * vec2(1.8, 0.75) + vec2(5.7, -3.1));',
+        '  float streaks = smoothstep(0.28, 0.88, n1 * 0.68 + n2 * 0.52);',
+        '  float rimBias = smoothstep(1.0, 0.25, radialT);',
+        '  float wisps = streaks * rimBias;',
+        '  float innerSolid = smoothstep(0.12, 0.0, radialT);',
+        '  float alpha = angEdge * clamp(innerSolid + 0.92 * wisps, 0.0, 1.0);',
+        '  gl_FragColor = vec4(1.0, 1.0, 1.0, alpha);',
         '}'
       ].join('\n')
     });
@@ -1862,6 +1921,7 @@
     applyBindingGlow(carrierOrbit, isSunDriven ? 0x00b7ff : (isSunFixed ? 0xffb020 : 0xffffff), true);
     applyBindingGlow(earthOutline, isEarthDriven ? 0x00b7ff : (isEarthFixed ? 0xffb020 : 0xffffff), true);
 
+    crescentMat.uniforms.time.value = timestamp / 1000.0;
     graceWedge.material.uniforms.time.value = timestamp / 1000.0;
 
     renderer.render(scene, camera);
