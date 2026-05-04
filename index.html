@@ -803,6 +803,7 @@
     `
   });
   var crescentMesh = new THREE.Mesh(crescentGeo, crescentMat);
+  crescentMesh.renderOrder = 1;
   graceGroup.add(crescentMesh);
 
   // ── Blue shadow Wheel (rendered below white layer) ────────────────────────
@@ -863,6 +864,7 @@
   var blueCrescentGeo = new THREE.PlaneGeometry(crescentSize, crescentSize);
   var blueCrescentMesh = new THREE.Mesh(blueCrescentGeo, blueCrescentMat);
   blueCrescentMesh.position.z = -0.002;
+  blueCrescentMesh.renderOrder = 0;
   graceGroup.add(blueCrescentMesh);
 
   // ── Blue shadow Arc (rendered below white Arc) ────────────────────────────
@@ -907,6 +909,7 @@
     return new THREE.Mesh(geom, mat);
   }());
   blueGraceWedge.position.z = -0.002;
+  blueGraceWedge.renderOrder = 0;
   blueGraceWedge.rotation.z = -GRACE_ARC_SPAN;
   graceGroup.add(blueGraceWedge);
 
@@ -985,6 +988,7 @@
     return new THREE.Mesh(geom, mat);
   }());
   graceWedge.position.z = 0;
+  graceWedge.renderOrder = 1;
   // Keep visible wedge aligned with collision interval after render-angle inversion.
   graceWedge.rotation.z = -GRACE_ARC_SPAN;
   graceGroup.add(graceWedge);
@@ -997,6 +1001,7 @@
     graceOutlineMat
   );
   wheelOutline.position.z = -0.003;
+  wheelOutline.renderOrder = 1;
   graceGroup.add(wheelOutline);
 
   var carrierLineGeom = new THREE.BufferGeometry();
@@ -1284,11 +1289,12 @@
 
       var meteor = new THREE.Mesh(meteorGeometry, createMeteorMaterial());
       meteor.visible = false;
+      meteor.renderOrder = 3;
       meteorLayer.add(meteor);
 
       var outline = new THREE.Mesh(meteorOutlineGeometry, createOutlineMaterial());
       outline.visible = false;
-      outline.renderOrder = -1;
+      outline.renderOrder = 2;
       meteorLayer.add(outline);
 
       // Spark streak LineSegments: N_SPARKS segments = N_SPARKS*2 verts
@@ -1321,6 +1327,7 @@
           '}'
         ].join('\n')
       }));
+      sparks.renderOrder = 4;
       sparks.visible = false;
       meteorLayer.add(sparks);
       var sparkState = [];
