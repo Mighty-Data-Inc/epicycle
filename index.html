@@ -729,7 +729,8 @@
       time:    { value: 0.0 },
       spinOmega: { value: 0.0 },
       spiralGain: { value: -8.0 },
-      redTint: { value: 0.0 }
+      redTint: { value: 0.0 },
+      opacity: { value: 0.7 }
     },
     vertexShader: `
       varying vec2 vPos;
@@ -746,6 +747,7 @@
       uniform float spinOmega;
       uniform float spiralGain;
       uniform float redTint;
+      uniform float opacity;
       varying vec2 vPos;
       float hash(vec2 p) {
         return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
@@ -796,12 +798,117 @@
         if (alpha < 0.001) discard;
         vec3 redToYellow = mix(vec3(1.0, 1.0, 0.0), vec3(0.5, 0.0, 0.0), rNorm);
         vec3 col = mix(vec3(1.0, 1.0, 1.0), redToYellow, redTint);
-        gl_FragColor = vec4(col, alpha);
+        gl_FragColor = vec4(col, alpha * opacity);
       }
     `
   });
   var crescentMesh = new THREE.Mesh(crescentGeo, crescentMat);
   graceGroup.add(crescentMesh);
+
+  // ── Blue shadow Wheel (rendered below white layer) ────────────────────────
+  var blueCrescentMat = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    uniforms: {
+      radius: { value: GRACE_RADIUS_U },
+      soft:   { value: 0.008 },
+      time:   { value: 0.0 },
+      yellowTint: { value: 0.0 }
+    },
+    vertexShader: `
+      varying vec2 vPos;
+      void main() {
+        vPos = position.xy;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform float radius;
+      uniform float soft;
+      uniform float time;
+      uniform float yellowTint;
+      varying vec2 vPos;
+      float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
+      float noise(vec2 p) {
+        vec2 i = floor(p); vec2 f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+        float a = hash(i); float b = hash(i + vec2(1,0));
+        float c = hash(i + vec2(0,1)); float d = hash(i + vec2(1,1));
+        return mix(mix(a,b,f.x), mix(c,d,f.x), f.y);
+      }
+      float fbm(vec2 p) {
+        float v = 0.0; float a = 0.5;
+        for (int i = 0; i < 4; i++) { v += a * noise(p); p = p * 2.03 + vec2(11.3, 7.1); a *= 0.52; }
+        return v;
+      }
+      void main() {
+        float d1 = length(vPos);
+        if (d1 > radius + soft) discard;
+        float inside1 = smoothstep(radius + soft, radius - soft, d1);
+        float rNorm = clamp(d1 / radius, 0.0, 1.0);
+        float ang01 = (atan(vPos.y, vPos.x) + 3.14159265359) / 6.28318530718;
+        float rimSolid = smoothstep(0.92, 0.985, rNorm);
+        vec2 flow = vec2(ang01 * 26.0 + time * 0.25, (1.0 - rNorm) * 11.0 - time * 1.8);
+        float n1 = fbm(flow);
+        float n2 = fbm(flow * vec2(1.8, 0.75) + vec2(5.7, -3.1));
+        float streaks = smoothstep(0.46, 0.9, n1 * 0.68 + n2 * 0.52);
+        float inwardFalloff = pow(rNorm, 4.2) * smoothstep(0.72, 0.985, rNorm);
+        float alpha = inside1 * clamp(rimSolid + 0.78 * streaks * inwardFalloff, 0.0, 1.0);
+        if (alpha < 0.001) discard;
+        vec3 col = mix(vec3(0.6, 0.82, 1.0), vec3(1.0, 0.9, 0.0), yellowTint);
+        gl_FragColor = vec4(col, alpha);
+      }
+    `
+  });
+  var blueCrescentGeo = new THREE.PlaneGeometry(crescentSize, crescentSize);
+  var blueCrescentMesh = new THREE.Mesh(blueCrescentGeo, blueCrescentMat);
+  blueCrescentMesh.position.z = -0.002;
+  graceGroup.add(blueCrescentMesh);
+
+  // ── Blue shadow Arc (rendered below white Arc) ────────────────────────────
+  var blueGraceWedge = (function () {
+    var geom = new THREE.RingGeometry(GRACE_RADIUS_U - 0.05, ABYSS_RADIUS_U, 64, 12, 0, GRACE_ARC_SPAN);
+    var mat = new THREE.ShaderMaterial({
+      transparent: true,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      uniforms: {
+        innerR:  { value: GRACE_RADIUS_U - 0.05 },
+        outerR:  { value: ABYSS_RADIUS_U },
+        arcSpan: { value: GRACE_ARC_SPAN },
+        time:    { value: 0.0 },
+        yellowTint: { value: 0.0 }
+      },
+      vertexShader: ['varying vec3 vPos;','void main() {','  vPos = position;','  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);','}'].join('\n'),
+      fragmentShader: [
+        'uniform float innerR;','uniform float outerR;','uniform float arcSpan;','uniform float time;','uniform float yellowTint;','varying vec3 vPos;',
+        'float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }',
+        'float noise(vec2 p) { vec2 i=floor(p); vec2 f=fract(p); f=f*f*(3.0-2.0*f); return mix(mix(hash(i),hash(i+vec2(1,0)),f.x),mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),f.x),f.y); }',
+        'float fbm(vec2 p) { float v=0.0,a=0.5; for(int i=0;i<4;i++){v+=a*noise(p);p=p*2.03+vec2(17.3,5.9);a*=0.52;} return v; }',
+        'void main() {',
+        '  float r = length(vPos.xy);',
+        '  float radialT = clamp((r - innerR) / (outerR - innerR), 0.0, 1.0);',
+        '  float angle = atan(vPos.y, vPos.x);',
+        '  if (angle < 0.0) angle += 6.28318530718;',
+        '  float angEdge = clamp(min(angle, arcSpan - angle) / (arcSpan * 0.10), 0.0, 1.0);',
+        '  float alongArc = clamp(angle / max(arcSpan, 0.0001), 0.0, 1.0);',
+        '  vec2 flow = vec2(alongArc * 14.0 + time * 0.25, (1.0 - radialT) * 6.0 + time * 1.8);',
+        '  float n1 = fbm(flow);',
+        '  float n2 = fbm(flow * vec2(1.8, 0.75) + vec2(5.7, -3.1));',
+        '  float streaks = smoothstep(0.28, 0.88, n1 * 0.68 + n2 * 0.52);',
+        '  float rimBias = smoothstep(1.0, 0.25, radialT);',
+        '  float innerSolid = smoothstep(0.12, 0.0, radialT);',
+        '  float alpha = angEdge * clamp(innerSolid + 0.92 * streaks * rimBias, 0.0, 1.0);',
+        '  vec3 col = mix(vec3(0.6, 0.82, 1.0), vec3(1.0, 0.9, 0.0), yellowTint);',
+        '  gl_FragColor = vec4(col, alpha);',
+        '}'
+      ].join('\n')
+    });
+    return new THREE.Mesh(geom, mat);
+  }());
+  blueGraceWedge.position.z = -0.002;
+  blueGraceWedge.rotation.z = -GRACE_ARC_SPAN;
+  graceGroup.add(blueGraceWedge);
 
   var graceWedge = (function () {
     var geom = new THREE.RingGeometry(GRACE_RADIUS_U - 0.05, ABYSS_RADIUS_U, 64, 12, 0, GRACE_ARC_SPAN);
@@ -814,7 +921,8 @@
         outerR: { value: ABYSS_RADIUS_U },
         arcSpan: { value: GRACE_ARC_SPAN },
         time: { value: 0.0 },
-        redTint: { value: 0.0 }
+        redTint: { value: 0.0 },
+        opacity: { value: 0.7 }
       },
       vertexShader: [
         'varying vec3 vPos;',
@@ -829,6 +937,7 @@
         'uniform float arcSpan;',
         'uniform float time;',
         'uniform float redTint;',
+        'uniform float opacity;',
         'varying vec3 vPos;',
         'float hash(vec2 p) {',
         '  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);',
@@ -869,7 +978,7 @@
         '  float innerSolid = smoothstep(0.12, 0.0, radialT);',
         '  float alpha = angEdge * clamp(innerSolid + 0.92 * wisps, 0.0, 1.0);',
         '  vec3 col = mix(vec3(1.0, 1.0, 1.0), vec3(0.5, 0.0, 0.0), redTint);',
-        '  gl_FragColor = vec4(col, alpha);',
+        '  gl_FragColor = vec4(col, alpha * opacity);',
         '}'
       ].join('\n')
     });
@@ -1054,62 +1163,6 @@
   const MAX_IMPACT_BURSTS = 12;
   const N_IMPACT_SPARKS = 28;
   var meteorGeometry = new THREE.SphereGeometry(METEOR_RADIUS_U, 24, 24);
-  var meteorDiscGeometry      = new THREE.CircleGeometry(METEOR_RADIUS_U * 5.0, 40);
-  var meteorDiscBlackGeometry  = new THREE.CircleGeometry(METEOR_RADIUS_U * 2.5, 32);
-  var meteorDiscVertexShader = [
-    'varying vec2 vUv;',
-    'void main() {',
-    '  vUv = uv;',
-    '  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);',
-    '}'
-  ].join('\n');
-  var meteorDiscFragmentShader = [
-    'uniform float time;',
-    'uniform float opacity;',
-    'uniform float seed;',
-    'uniform vec3 baseColor;',
-    'varying vec2 vUv;',
-    'float hash(vec2 p) {',
-    '  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);',
-    '}',
-    'float noise(vec2 p) {',
-    '  vec2 i = floor(p);',
-    '  vec2 f = fract(p);',
-    '  f = f * f * (3.0 - 2.0 * f);',
-    '  float a = hash(i + vec2(0.0, 0.0));',
-    '  float b = hash(i + vec2(1.0, 0.0));',
-    '  float c = hash(i + vec2(0.0, 1.0));',
-    '  float d = hash(i + vec2(1.0, 1.0));',
-    '  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);',
-    '}',
-    'float fbm(vec2 p) {',
-    '  float v = 0.0;',
-    '  float a = 0.5;',
-    '  for (int i = 0; i < 4; i++) {',
-    '    v += a * noise(p);',
-    '    p = p * 2.02 + vec2(11.3, 7.9);',
-    '    a *= 0.53;',
-    '  }',
-    '  return v;',
-    '}',
-    'void main() {',
-    '  vec2 p = (vUv - 0.5) * 2.0;',
-    '  float r = length(p);',
-    '  if (r > 1.0) discard;',
-    '  vec2 flow = vec2(time * 0.36, -time * 0.31) + vec2(seed * 13.7, seed * 5.1);',
-    '  float n1 = fbm(p * 2.1 + flow);',
-    '  float n2 = fbm(p * 4.0 - flow * 1.3 + 9.2);',
-    '  float wisps = smoothstep(0.42, 0.86, n1 * 0.7 + n2 * 0.3);',
-    '  float radial = smoothstep(1.0, 0.2, r);',
-    '  float edgeFade = smoothstep(1.0, 0.55, r);',
-    '  float centerFill = smoothstep(0.55, 0.0, r);',
-    '  float intensity = wisps * radial * edgeFade + 0.6 * centerFill;',
-    '  float a = opacity * intensity;',
-    '  if (a < 0.003) discard;',
-    '  vec3 col = mix(baseColor * 0.18, baseColor, wisps);',
-    '  gl_FragColor = vec4(col, a);',
-    '}'
-  ].join('\n');
   var meteorVertexShader = [
     'varying vec3 vN;',
     'void main() {',
@@ -1206,34 +1259,9 @@
     });
   }
 
-  function createMeteorDiscMaterial(seed, cr, cg, cb) {
-    return new THREE.ShaderMaterial({
-      transparent: true,
-      depthWrite: false,
-      uniforms: {
-        time:      { value: 0 },
-        opacity:   { value: 1 },
-        seed:      { value: seed },
-        baseColor: { value: new THREE.Vector3(cr, cg, cb) }
-      },
-      vertexShader: meteorDiscVertexShader,
-      fragmentShader: meteorDiscFragmentShader
-    });
-  }
-
   function initMeteorPool() {
     for (var i = 0; i < MAX_METEOR_RENDER; i++) {
       var baseSeed = (i + 1) * 0.173;
-
-      var discRed = new THREE.Mesh(meteorDiscGeometry,
-        createMeteorDiscMaterial(baseSeed + 17.3,   0.85, 0.05, 0.00));
-      discRed.visible = false;
-      meteorLayer.add(discRed);
-
-      var discBlack = new THREE.Mesh(meteorDiscBlackGeometry,
-        createMeteorDiscMaterial(baseSeed + 31.7,   0.04, 0.01, 0.01));
-      discBlack.visible = false;
-      meteorLayer.add(discBlack);
 
       var meteor = new THREE.Mesh(meteorGeometry, createMeteorMaterial());
       meteor.visible = false;
@@ -1252,15 +1280,13 @@
       var sparkState = [];
       for (var j = 0; j < N_SPARKS; j++) sparkState.push({ alive: false, life: 0, maxLife: 1, p0x: 0, p0y: 0, p1x: 0, p1y: 0, vx: 0, vy: 0 });
 
-      meteorPool.push({ meteor: meteor, discBlack: discBlack, discRed: discRed, sparks: sparks, sparkState: sparkState });
+      meteorPool.push({ meteor: meteor, sparks: sparks, sparkState: sparkState });
     }
   }
 
   function clearMeteorLayer() {
     for (var i = 0; i < meteorPool.length; i++) {
       meteorPool[i].meteor.visible = false;
-      meteorPool[i].discBlack.visible  = false;
-      meteorPool[i].discRed.visible    = false;
       meteorPool[i].sparks.visible     = false;
     }
   }
@@ -1282,16 +1308,6 @@
     meteor.position.set(x, y, 0);
     meteor.visible = true;
 
-    var setDisc = function(disc, zOff, op, s) {
-      disc.position.set(x, y, zOff);
-      disc.material.uniforms.time.value = t;
-      disc.material.uniforms.opacity.value = Math.max(0, Math.min(1, op));
-      if (s !== undefined) disc.material.uniforms.seed.value = s;
-      disc.visible = true;
-    };
-    setDisc(slot.discBlack,  -0.01, opacity * 0.65, seed);
-    setDisc(slot.discRed,    -0.02, opacity * 0.85, seed !== undefined ? seed + 17.3 : undefined);
-
     // ── spark streak simulation ──────────────────────────────────────────
     var ss = slot.sparkState;
     var posArr = slot.sparks.geometry.attributes.position.array;
@@ -1309,8 +1325,8 @@
           s.p0x += s.vx * adt;  s.p0y += s.vy * adt;
           s.p1x += s.vx * adt;  s.p1y += s.vy * adt;
           var f = s.life / s.maxLife; // 1=fresh → 0=dead
-          var hr = 1.0, hg = 0.65 + 0.35 * f, hb = 0.15 * f; // head: white→orange
-          var tr = 0.9 * f, tg = 0.3 * f, tb = 0.0;           // tail: orange→dark
+          var hr = 1.0, hg = 1.0, hb = 1.0;           // head: white
+          var tr = 1.0 * f, tg = 1.0 * f, tb = 1.0 * f; // tail: white, fading
           posArr[base]   = s.p0x; posArr[base+1] = s.p0y; posArr[base+2] = 0.02;
           posArr[base+3] = s.p1x; posArr[base+4] = s.p1y; posArr[base+5] = 0.02;
           colArr[base]   = hr * f * opacity; colArr[base+1] = hg * f * opacity; colArr[base+2] = hb * opacity;
@@ -1799,9 +1815,13 @@
       }
       crescentMat.uniforms.redTint.value = Math.max(0.0, colorIntensity);
       graceWedge.material.uniforms.redTint.value = Math.max(0.0, colorIntensity);
+      blueCrescentMat.uniforms.yellowTint.value = Math.max(0.0, colorIntensity);
+      blueGraceWedge.material.uniforms.yellowTint.value = Math.max(0.0, colorIntensity);
     } else {
       crescentMat.uniforms.redTint.value = 0.0;
       graceWedge.material.uniforms.redTint.value = 0.0;
+      blueCrescentMat.uniforms.yellowTint.value = 0.0;
+      blueGraceWedge.material.uniforms.yellowTint.value = 0.0;
     }
     
     if (!graceShudder.active) return;
@@ -1856,12 +1876,14 @@
 
     // Update all meteors; collect survivors.
     var survivors = [];
+    var anyRepelling = false;
     for (var i = 0; i < meteors.length; i++) {
       var m = meteors[i];
       m.age = (m.age || 0) + dt;
       m.angle += m.omega * dt;
       if (isInGraceArc(m.angle, angles.grace)) {
         m.radius += METEOR_EXPULSION_RATE * dt;
+        anyRepelling = true;
       } else {
         m.radius -= METEOR_DESCENT_RATE * dt;
       }
@@ -1991,7 +2013,11 @@
 
     crescentMat.uniforms.time.value = timestamp / 1000.0;
     crescentMat.uniforms.spinOmega.value = -graceOmega;
+    crescentMat.uniforms.opacity.value = anyRepelling ? 1.0 : 0.7;
+    graceWedge.material.uniforms.opacity.value = anyRepelling ? 1.0 : 0.7;
+    blueCrescentMat.uniforms.time.value = timestamp / 1000.0;
     graceWedge.material.uniforms.time.value = timestamp / 1000.0;
+    blueGraceWedge.material.uniforms.time.value = timestamp / 1000.0;
 
     renderer.render(scene, camera);
 
