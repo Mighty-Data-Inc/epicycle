@@ -726,7 +726,9 @@
       radius:  { value: GRACE_RADIUS_U },
       offset:  { value: new THREE.Vector2(crescentOx, crescentOy) },
       soft:    { value: 0.008 },
-      time:    { value: 0.0 }
+      time:    { value: 0.0 },
+      spinOmega: { value: 0.0 },
+      spiralGain: { value: -8.0 }
     },
     vertexShader: `
       varying vec2 vPos;
@@ -740,6 +742,8 @@
       uniform vec2  offset;
       uniform float soft;
       uniform float time;
+      uniform float spinOmega;
+      uniform float spiralGain;
       varying vec2 vPos;
       float hash(vec2 p) {
         return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
@@ -777,7 +781,9 @@
         float rimSolid = smoothstep(0.92, 0.985, rNorm);
 
         // Wisps flow inward from the rim, with animated directional noise.
-        vec2 flow = vec2(ang01 * 26.0 + time * 0.35, (1.0 - rNorm) * 11.0 - time * 2.4);
+        // Spiral offset makes tendrils trail counterclockwise as they go inward.
+        float spiral = (1.0 - rNorm) * spinOmega * spiralGain;
+        vec2 flow = vec2(ang01 * 100.0 + time * 0.8 - spiral, (1.0 - rNorm) * 11.0 - time * 2.4);
         float n1 = fbm(flow);
         float n2 = fbm(flow * vec2(1.8, 0.75) + vec2(5.7, -3.1));
         float streaks = smoothstep(0.46, 0.9, n1 * 0.68 + n2 * 0.52);
@@ -1777,7 +1783,8 @@
     angles.sun     += omegas.sun     * dt;
 
     var unboundKey = GEAR_OMEGA_KEY[findGearByBinding(GearBinding.UNBOUND)];
-    angles.grace   += (omegas[unboundKey] || 0) * dt;
+    var graceOmega = omegas[unboundKey] || 0;
+    angles.grace   += graceOmega * dt;
 
     // Spawn a new meteor every meteorInterval seconds until game over.
     if (!gameOver) {
@@ -1922,6 +1929,7 @@
     applyBindingGlow(earthOutline, isEarthDriven ? 0x00b7ff : (isEarthFixed ? 0xffb020 : 0xffffff), true);
 
     crescentMat.uniforms.time.value = timestamp / 1000.0;
+    crescentMat.uniforms.spinOmega.value = -graceOmega;
     graceWedge.material.uniforms.time.value = timestamp / 1000.0;
 
     renderer.render(scene, camera);
