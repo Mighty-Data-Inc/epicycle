@@ -359,7 +359,7 @@
   // ── meteor ────────────────────────────────────────────────────────────────
   // Descent rate: 1 distance unit in 12 seconds (= 2 full driver revolutions).
   const GRACE_ARC_SPAN = (2 * Math.PI) / 12;
-  const METEOR_DESCENT_RATE = 1 / 12; // units per second
+  const BASE_METEOR_DESCENT_RATE = 1 / 12; // units per second
   const MAX_METEOR_RENDER = 8;
   var meteorsImpact = 0;
   var meteorsRepelled = 0;
@@ -384,6 +384,8 @@
   }
 
   var meteorInterval = readNumFromQuery('meteorInterval', 10);
+  var meteorDescentRate = readNumFromQuery('meteorDescentRate', 1);
+  const METEOR_DESCENT_RATE = BASE_METEOR_DESCENT_RATE * meteorDescentRate;
   var repulsionForce = readNumFromQuery('repulsionForce', 5);
   const METEOR_EXPULSION_RATE = METEOR_DESCENT_RATE * repulsionForce;
   var gameOver = false;
@@ -977,6 +979,8 @@
   var meteorPool = [];
   const METEOR_RADIUS_U = 0.1;
   const N_SPARKS = 32;
+  const MAX_IMPACT_BURSTS = 12;
+  const N_IMPACT_SPARKS = 28;
   var meteorGeometry = new THREE.SphereGeometry(METEOR_RADIUS_U, 24, 24);
   var meteorDiscGeometry      = new THREE.CircleGeometry(METEOR_RADIUS_U * 5.0, 40);
   var meteorDiscBlackGeometry  = new THREE.CircleGeometry(METEOR_RADIUS_U * 2.5, 32);
@@ -1278,6 +1282,422 @@
 
   initMeteorPool();
 
+  var impactBurstPool = [];
+  var impactBurstCursor = 0;
+  var impactFlareGeometry = new THREE.CircleGeometry(1, 48);
+  var impactRingGeometry = new THREE.CircleGeometry(1.2, 96);
+  var impactFlameVertexShader = [
+    'varying vec2 vPos;',
+    'void main() {',
+    '  vPos = position.xy;',
+    '  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);',
+    '}'
+  ].join('\n');
+  var impactFlameFragmentShader = [
+    'uniform float time;',
+    'uniform float opacity;',
+    'uniform float seed;',
+    'uniform vec3 color;',
+    'varying vec2 vPos;',
+    'float hash(vec2 p) {',
+    '  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);',
+    '}',
+    'float noise(vec2 p) {',
+    '  vec2 i = floor(p);',
+    '  vec2 f = fract(p);',
+    '  f = f * f * (3.0 - 2.0 * f);',
+    '  float a = hash(i + vec2(0.0, 0.0));',
+    '  float b = hash(i + vec2(1.0, 0.0));',
+    '  float c = hash(i + vec2(0.0, 1.0));',
+    '  float d = hash(i + vec2(1.0, 1.0));',
+    '  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);',
+    '}',
+    'float fbm(vec2 p) {',
+    '  float v = 0.0;',
+    '  float a = 0.5;',
+    '  for (int i = 0; i < 4; i++) {',
+    '    v += a * noise(p);',
+    '    p = p * 2.02 + vec2(9.7, 13.1);',
+    '    a *= 0.52;',
+    '  }',
+    '  return v;',
+    '}',
+    'void main() {',
+    '  vec2 p = vPos;',
+    '  float r = length(p);',
+    '  if (r > 1.0) discard;',
+    '  float ang = atan(p.y, p.x);',
+    '  float ang01 = (ang + 3.14159265359) / 6.28318530718;',
+    '  vec2 flow = vec2(ang01 * 24.0 + seed * 4.1, r * 14.0 - time * 3.6);',
+    '  float n = fbm(flow);',
+    '  float n2 = fbm(flow * vec2(1.9, 0.78) + vec2(7.3, -5.4));',
+    '  float jag = smoothstep(0.34, 0.90, n * 0.66 + n2 * 0.56);',
+    '  float edgeNoise = fbm(vec2(ang01 * 20.0 + seed * 1.3, time * 1.35));',
+    '  float tipRadius = 0.68 + 0.28 * edgeNoise;',
+    '  float tendrilMask = smoothstep(tipRadius + 0.03, tipRadius - 0.11, r);',
+    '  float body = smoothstep(0.06, 0.72, r);',
+    '  float outer = smoothstep(0.70, 1.0, r);',
+    '  float flame = (body * 0.7 + outer * 1.2) * jag * tendrilMask;',
+    '  flame += outer * pow(max(0.0, n2 - 0.34), 2.0) * 1.05;',
+    '  float a = opacity * flame * 1.45;',
+    '  if (a < 0.005) discard;',
+    '  vec3 hot = mix(color, vec3(1.0, 0.5, 0.12), outer * 0.58 + jag * 0.22);',
+    '  gl_FragColor = vec4(hot, a);',
+    '}'
+  ].join('\n');
+  var impactRingVertexShader = [
+    'varying vec2 vUv;',
+    'varying vec2 vPos;',
+    'void main() {',
+    '  vUv = uv;',
+    '  vPos = position.xy;',
+    '  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);',
+    '}'
+  ].join('\n');
+  var impactRingFragmentShader = [
+    'uniform float time;',
+    'uniform float opacity;',
+    'uniform float seed;',
+    'uniform vec3 color;',
+    'varying vec2 vUv;',
+    'varying vec2 vPos;',
+    'float hash(vec2 p) {',
+    '  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);',
+    '}',
+    'float noise(vec2 p) {',
+    '  vec2 i = floor(p);',
+    '  vec2 f = fract(p);',
+    '  f = f * f * (3.0 - 2.0 * f);',
+    '  float a = hash(i + vec2(0.0, 0.0));',
+    '  float b = hash(i + vec2(1.0, 0.0));',
+    '  float c = hash(i + vec2(0.0, 1.0));',
+    '  float d = hash(i + vec2(1.0, 1.0));',
+    '  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);',
+    '}',
+    'float fbm(vec2 p) {',
+    '  float v = 0.0;',
+    '  float a = 0.5;',
+    '  for (int i = 0; i < 4; i++) {',
+    '    v += a * noise(p);',
+    '    p = p * 2.03 + vec2(17.3, 5.9);',
+    '    a *= 0.52;',
+    '  }',
+    '  return v;',
+    '}',
+    'void main() {',
+    '  vec2 p = vPos;',
+    '  float r = length(p);',
+    '  if (r > 1.18 || r < 0.62) discard;',
+    '  float rr = clamp((r - 0.62) / 0.56, 0.0, 1.0);',
+    '  float ang = atan(p.y, p.x);',
+    '  float ang01 = (ang + 3.14159265359) / 6.28318530718;',
+    '  vec2 flow = vec2(ang01 * 30.0 + seed * 7.3, rr * 18.0 - time * 4.1);',
+    '  float n = fbm(flow);',
+    '  float n2 = fbm(flow * vec2(2.4, 0.9) + vec2(11.2, -7.7));',
+    '  float jag = smoothstep(0.36, 0.86, n * 0.65 + n2 * 0.55);',
+    '  float edgeNoise = fbm(vec2(ang01 * 22.0 + seed * 1.7, time * 1.4));',
+    '  float tipRadius = 0.82 + 0.32 * edgeNoise;',
+    '  float tendrilMask = smoothstep(tipRadius + 0.02, tipRadius - 0.12, r);',
+    '  float body = smoothstep(0.62, 0.86, r);',
+    '  float outer = smoothstep(0.86, 1.16, r);',
+    '  float flame = (body * 0.55 + outer * 1.35) * jag * tendrilMask;',
+    '  flame += outer * pow(max(0.0, n2 - 0.30), 2.0) * 1.35;',
+    '  float holes = 1.0 - smoothstep(0.70, 0.96, n + n2 * 0.65);',
+    '  flame *= (0.78 + 0.22 * holes);',
+    '  float a = opacity * flame * 1.8;',
+    '  if (a < 0.006) discard;',
+    '  vec3 hot = mix(color, vec3(1.0, 0.42, 0.08), outer * 0.65 + jag * 0.25);',
+    '  gl_FragColor = vec4(hot, a);',
+    '}'
+  ].join('\n');
+
+  function createImpactFlameMaterial(cr, cg, cb, seedBase) {
+    return new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.NormalBlending,
+      uniforms: {
+        time: { value: 0 },
+        opacity: { value: 0 },
+        seed: { value: seedBase + Math.random() * 1000 },
+        color: { value: new THREE.Vector3(cr, cg, cb) }
+      },
+      vertexShader: impactFlameVertexShader,
+      fragmentShader: impactFlameFragmentShader
+    });
+  }
+
+    var impactCoreFragmentShader = [
+      'uniform float time;',
+      'uniform float opacity;',
+      'uniform float seed;',
+      'uniform vec3 color;',
+      'varying vec2 vPos;',
+      'float hash(vec2 p) {',
+      '  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);',
+      '}',
+      'float noise(vec2 p) {',
+      '  vec2 i = floor(p); vec2 f = fract(p);',
+      '  f = f * f * (3.0 - 2.0 * f);',
+      '  float a = hash(i + vec2(0.0, 0.0));',
+      '  float b = hash(i + vec2(1.0, 0.0));',
+      '  float c = hash(i + vec2(0.0, 1.0));',
+      '  float d = hash(i + vec2(1.0, 1.0));',
+      '  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);',
+      '}',
+      'float fbm(vec2 p) {',
+      '  float v = 0.0; float a = 0.5;',
+      '  for (int i = 0; i < 4; i++) {',
+      '    v += a * noise(p); p = p * 2.02 + vec2(9.7, 13.1); a *= 0.52;',
+      '  }',
+      '  return v;',
+      '}',
+      'void main() {',
+      '  vec2 p = vPos;',
+      '  float r = length(p);',
+      '  if (r > 1.0) discard;',
+      '  float ang = atan(p.y, p.x);',
+      '  float ang01 = (ang + 3.14159265359) / 6.28318530718;',
+      '  vec2 flow = vec2(ang01 * 24.0 + seed * 4.1, r * 14.0 - time * 3.6);',
+      '  float n = fbm(flow);',
+      '  float n2 = fbm(flow * vec2(1.9, 0.78) + vec2(7.3, -5.4));',
+      '  float jag = smoothstep(0.34, 0.90, n * 0.66 + n2 * 0.56);',
+      '  float edgeNoise = fbm(vec2(ang01 * 20.0 + seed * 1.3, time * 1.35));',
+      '  float tipRadius = 0.72 + 0.24 * edgeNoise;',
+      '  float tendrilMask = smoothstep(tipRadius + 0.03, tipRadius - 0.12, r);',
+      '  float fill = smoothstep(1.0, 0.05, r);',
+      '  float edgeWisp = smoothstep(0.30, 0.92, r);',
+      '  float flame = fill * (0.72 + 0.28 * jag) + edgeWisp * 0.9 * jag * tendrilMask;',
+      '  float a = opacity * flame * 1.5;',
+      '  if (a < 0.005) discard;',
+      '  float hotCenter = smoothstep(0.6, 0.0, r);',
+      '  vec3 hot = mix(color, vec3(1.0, 0.95, 0.55), hotCenter * 0.6 + jag * 0.15);',
+      '  gl_FragColor = vec4(hot, a);',
+      '}'
+    ].join('\n');
+
+    function createImpactCoreMaterial(cr, cg, cb, seedBase) {
+      return new THREE.ShaderMaterial({
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.NormalBlending,
+        uniforms: {
+          time: { value: 0 },
+          opacity: { value: 0 },
+          seed: { value: seedBase + Math.random() * 1000 },
+          color: { value: new THREE.Vector3(cr, cg, cb) }
+        },
+        vertexShader: impactFlameVertexShader,
+        fragmentShader: impactCoreFragmentShader
+      });
+    }
+
+  function initImpactBurstPool() {
+    for (var i = 0; i < MAX_IMPACT_BURSTS; i++) {
+      var flare = new THREE.Mesh(impactFlareGeometry, createImpactFlameMaterial(1.0, 0.23, 0.06, i * 17.0 + 3.1));
+      flare.visible = false;
+      flare.position.z = 0.025;
+      meteorLayer.add(flare);
+
+      var core = new THREE.Mesh(impactFlareGeometry, createImpactCoreMaterial(1.0, 0.84, 0.08, i * 29.0 + 7.3));
+      core.visible = false;
+      core.position.z = 0.026;
+      meteorLayer.add(core);
+
+      var ring = new THREE.Mesh(impactRingGeometry, new THREE.MeshBasicMaterial({
+        color: 0xb00000,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        blending: THREE.NormalBlending,
+        side: THREE.DoubleSide
+      }));
+      ring.material = new THREE.ShaderMaterial({
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.NormalBlending,
+        side: THREE.DoubleSide,
+        uniforms: {
+          time: { value: 0 },
+          opacity: { value: 0 },
+          seed: { value: Math.random() * 1000 },
+          color: { value: new THREE.Vector3(0.69, 0.0, 0.0) }
+        },
+        vertexShader: impactRingVertexShader,
+        fragmentShader: impactRingFragmentShader
+      });
+      ring.visible = false;
+      ring.position.z = 0.027;
+      meteorLayer.add(ring);
+
+      var impactPos = new Float32Array(N_IMPACT_SPARKS * 6);
+      var impactCol = new Float32Array(N_IMPACT_SPARKS * 6);
+      var impactGeom = new THREE.BufferGeometry();
+      impactGeom.setAttribute('position', new THREE.BufferAttribute(impactPos, 3));
+      impactGeom.setAttribute('color', new THREE.BufferAttribute(impactCol, 3));
+      var impactSparks = new THREE.LineSegments(impactGeom, new THREE.LineBasicMaterial({
+        vertexColors: true,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.NormalBlending
+      }));
+      impactSparks.visible = false;
+      meteorLayer.add(impactSparks);
+
+      var sparkState = [];
+      for (var j = 0; j < N_IMPACT_SPARKS; j++) {
+        sparkState.push({ alive: false, life: 0, maxLife: 0, hx: 0, hy: 0, tx: 0, ty: 0, vx: 0, vy: 0 });
+      }
+
+      impactBurstPool.push({
+        alive: false,
+        t: 0,
+        life: 0.3,
+        x: 0,
+        y: 0,
+        dx: 0,
+        dy: 0,
+        flare: flare,
+        core: core,
+        ring: ring,
+        sparks: impactSparks,
+        sparkState: sparkState
+      });
+    }
+  }
+
+  function triggerImpactBurst(x, y, dx, dy) {
+    if (impactBurstPool.length === 0) return;
+    var b = impactBurstPool[impactBurstCursor];
+    impactBurstCursor = (impactBurstCursor + 1) % impactBurstPool.length;
+
+    var dlen = Math.sqrt(dx * dx + dy * dy) || 1;
+    b.alive = true;
+    b.t = 0;
+    b.life = 0.24 + Math.random() * 0.09;
+    b.x = x;
+    b.y = y;
+    b.dx = dx / dlen;
+    b.dy = dy / dlen;
+
+    b.flare.position.set(x, y, 0.025);
+    b.core.position.set(x, y, 0.026);
+    b.ring.position.set(x, y, 0.027);
+    b.flare.scale.set(0.06, 0.06, 1);
+    b.core.scale.set(0.025, 0.025, 1);
+    b.ring.scale.set(0.05, 0.05, 1);
+    b.flare.visible = true;
+    b.core.visible = true;
+    b.ring.visible = true;
+    b.flare.material.uniforms.time.value = 0;
+    b.flare.material.uniforms.opacity.value = 0;
+    b.flare.material.uniforms.seed.value = Math.random() * 1000;
+    b.core.material.uniforms.time.value = 0;
+    b.core.material.uniforms.opacity.value = 0;
+    b.core.material.uniforms.seed.value = Math.random() * 1000;
+    b.ring.material.uniforms.time.value = 0;
+    b.ring.material.uniforms.opacity.value = 0;
+    b.ring.material.uniforms.seed.value = Math.random() * 1000;
+    b.sparks.visible = true;
+
+    var posArr = b.sparks.geometry.attributes.position.array;
+    var colArr = b.sparks.geometry.attributes.color.array;
+    for (var i = 0; i < N_IMPACT_SPARKS; i++) {
+      var s = b.sparkState[i];
+      var ang = Math.random() * Math.PI * 2;
+      var rx = Math.cos(ang);
+      var ry = Math.sin(ang);
+      var dvx = rx + b.dx * 0.7 + (Math.random() - 0.5) * 0.35;
+      var dvy = ry + b.dy * 0.7 + (Math.random() - 0.5) * 0.35;
+      var vlen = Math.sqrt(dvx * dvx + dvy * dvy) || 1;
+      var speed = 0.8 + Math.random() * 1.5;
+
+      s.alive = true;
+      s.maxLife = 0.26 + Math.random() * 0.52;
+      s.life = s.maxLife;
+      s.vx = dvx / vlen * speed;
+      s.vy = dvy / vlen * speed;
+      s.hx = x + rx * (METEOR_RADIUS_U * 0.35);
+      s.hy = y + ry * (METEOR_RADIUS_U * 0.35);
+      s.tx = s.hx - s.vx * 0.03;
+      s.ty = s.hy - s.vy * 0.03;
+
+      var base = i * 6;
+      posArr[base] = s.hx; posArr[base + 1] = s.hy; posArr[base + 2] = 0.028;
+      posArr[base + 3] = s.tx; posArr[base + 4] = s.ty; posArr[base + 5] = 0.028;
+      colArr[base] = 1.0; colArr[base + 1] = 0.85; colArr[base + 2] = 0.15;
+      colArr[base + 3] = 0.7; colArr[base + 4] = 0.1; colArr[base + 5] = 0.05;
+    }
+    b.sparks.geometry.attributes.position.needsUpdate = true;
+    b.sparks.geometry.attributes.color.needsUpdate = true;
+  }
+
+  function updateImpactBursts(dt) {
+    for (var bi = 0; bi < impactBurstPool.length; bi++) {
+      var b = impactBurstPool[bi];
+      if (!b.alive) continue;
+
+      b.t += dt;
+      var u = b.t / b.life;
+      if (u >= 1) {
+        b.alive = false;
+        b.flare.visible = false;
+        b.core.visible = false;
+        b.ring.visible = false;
+        b.sparks.visible = false;
+        continue;
+      }
+
+      var inv = 1 - u;
+      b.flare.scale.setScalar(0.07 + 0.525 * u);
+      b.core.scale.setScalar(0.025 + 0.225 * u);
+      b.ring.scale.setScalar(0.05 + 0.86 * u);
+      b.flare.material.uniforms.time.value = b.t;
+      b.core.material.uniforms.time.value = b.t;
+      b.flare.material.uniforms.opacity.value = 1.4 * inv;
+      b.core.material.uniforms.opacity.value = 1.8 * Math.pow(inv, 1.0);
+      b.ring.material.uniforms.time.value = b.t;
+      b.ring.material.uniforms.opacity.value = 1.0 * inv;
+
+      var posArr = b.sparks.geometry.attributes.position.array;
+      var colArr = b.sparks.geometry.attributes.color.array;
+      for (var si = 0; si < N_IMPACT_SPARKS; si++) {
+        var s = b.sparkState[si];
+        var base = si * 6;
+        if (!s.alive) {
+          colArr[base] = colArr[base + 1] = colArr[base + 2] = 0;
+          colArr[base + 3] = colArr[base + 4] = colArr[base + 5] = 0;
+          continue;
+        }
+
+        s.life -= dt;
+        if (s.life <= 0) {
+          s.alive = false;
+          colArr[base] = colArr[base + 1] = colArr[base + 2] = 0;
+          colArr[base + 3] = colArr[base + 4] = colArr[base + 5] = 0;
+          continue;
+        }
+
+        s.vx *= 0.985;
+        s.vy *= 0.985;
+        s.hx += s.vx * dt;
+        s.hy += s.vy * dt;
+        s.tx += s.vx * dt;
+        s.ty += s.vy * dt;
+
+        var lf = s.life / s.maxLife;
+        posArr[base] = s.hx; posArr[base + 1] = s.hy; posArr[base + 2] = 0.028;
+        posArr[base + 3] = s.tx; posArr[base + 4] = s.ty; posArr[base + 5] = 0.028;
+        colArr[base] = 1.0 * lf; colArr[base + 1] = 0.85 * lf; colArr[base + 2] = 0.15 * lf;
+        colArr[base + 3] = 0.7 * lf; colArr[base + 4] = 0.1 * lf; colArr[base + 5] = 0.0;
+      }
+      b.sparks.geometry.attributes.position.needsUpdate = true;
+      b.sparks.geometry.attributes.color.needsUpdate = true;
+    }
+  }
+
+  initImpactBurstPool();
+
   function applyBindingGlow(mesh, colorHex, active) {
     if (!mesh || !mesh.material) return;
     mesh.material.color.setHex(colorHex);
@@ -1321,6 +1741,19 @@
         m.radius -= METEOR_DESCENT_RATE * dt;
       }
       if (m.radius <= GRACE_RADIUS_U) {
+        var impactAngle = -m.angle;
+        var impactX = GRACE_RADIUS_U * Math.cos(impactAngle);
+        var impactY = GRACE_RADIUS_U * Math.sin(impactAngle);
+        var graceRenderAngle = -angles.grace;
+        var arcX = GRACE_RADIUS_U * Math.cos(graceRenderAngle);
+        var arcY = GRACE_RADIUS_U * Math.sin(graceRenderAngle);
+        var bdx = impactX - arcX;
+        var bdy = impactY - arcY;
+        var blen = Math.sqrt(bdx * bdx + bdy * bdy) || 1;
+        bdx /= blen;
+        bdy /= blen;
+        triggerImpactBurst(impactX, impactY, bdx, bdy);
+
         meteorsImpact += 1;
         valImpacts.textContent = meteorsImpact;
         updateVictoryState();
@@ -1422,6 +1855,8 @@
 
       pushMeteorMesh(mi, meteorX, meteorY, opacity, colorHex, m.age || 0, heat, m.seed, grace, gdx, gdy, dt);
     }
+
+    updateImpactBursts(dt);
 
     applyBindingGlow(ringLine, isRingDriven ? 0x00b7ff : (isRingFixed ? 0xffb020 : 0xffffff), true);
     applyBindingGlow(carrierOrbit, isSunDriven ? 0x00b7ff : (isSunFixed ? 0xffb020 : 0xffffff), true);
