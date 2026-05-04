@@ -728,7 +728,8 @@
       soft:    { value: 0.008 },
       time:    { value: 0.0 },
       spinOmega: { value: 0.0 },
-      spiralGain: { value: -8.0 }
+      spiralGain: { value: -8.0 },
+      redTint: { value: 0.0 }
     },
     vertexShader: `
       varying vec2 vPos;
@@ -744,6 +745,7 @@
       uniform float time;
       uniform float spinOmega;
       uniform float spiralGain;
+      uniform float redTint;
       varying vec2 vPos;
       float hash(vec2 p) {
         return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
@@ -792,7 +794,9 @@
 
         float alpha = inside1 * clamp(rimSolid + (0.78 * tendrils), 0.0, 1.0);
         if (alpha < 0.001) discard;
-        gl_FragColor = vec4(1.0, 1.0, 1.0, alpha);
+        vec3 redToYellow = mix(vec3(1.0, 1.0, 0.0), vec3(0.5, 0.0, 0.0), rNorm);
+        vec3 col = mix(vec3(1.0, 1.0, 1.0), redToYellow, redTint);
+        gl_FragColor = vec4(col, alpha);
       }
     `
   });
@@ -809,7 +813,8 @@
         innerR: { value: GRACE_RADIUS_U - 0.05 },
         outerR: { value: ABYSS_RADIUS_U },
         arcSpan: { value: GRACE_ARC_SPAN },
-        time: { value: 0.0 }
+        time: { value: 0.0 },
+        redTint: { value: 0.0 }
       },
       vertexShader: [
         'varying vec3 vPos;',
@@ -823,6 +828,7 @@
         'uniform float outerR;',
         'uniform float arcSpan;',
         'uniform float time;',
+        'uniform float redTint;',
         'varying vec3 vPos;',
         'float hash(vec2 p) {',
         '  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);',
@@ -862,7 +868,8 @@
         '  float wisps = streaks * rimBias;',
         '  float innerSolid = smoothstep(0.12, 0.0, radialT);',
         '  float alpha = angEdge * clamp(innerSolid + 0.92 * wisps, 0.0, 1.0);',
-        '  gl_FragColor = vec4(1.0, 1.0, 1.0, alpha);',
+        '  vec3 col = mix(vec3(1.0, 1.0, 1.0), vec3(0.5, 0.0, 0.0), redTint);',
+        '  gl_FragColor = vec4(col, alpha);',
         '}'
       ].join('\n')
     });
@@ -1763,6 +1770,58 @@
 
   initImpactBurstPool();
 
+  // Shudder effect state for Wheel/Arc impacts
+  var graceShudder = {
+    active: false,
+    time: 0.0,
+    duration: 0.35,
+    colorTime: 0.6,
+    colorDuration: 0.6
+  };
+
+  function triggerGraceShudder() {
+    graceShudder.active = true;
+    graceShudder.time = 0.0;
+    graceShudder.colorTime = 0.0;
+  }
+
+  function updateGraceShudder(dt) {
+    // Update color independently (lasts 1.2s)
+    if (graceShudder.colorTime < graceShudder.colorDuration) {
+      graceShudder.colorTime += dt;
+      var tc = graceShudder.colorTime / graceShudder.colorDuration;
+      var colorIntensity;
+      var attackFrac = 0.2 / graceShudder.colorDuration;
+      if (tc < attackFrac) {
+        colorIntensity = tc / attackFrac;
+      } else {
+        colorIntensity = 1.0 - (tc - attackFrac) / (1.0 - attackFrac);
+      }
+      crescentMat.uniforms.redTint.value = Math.max(0.0, colorIntensity);
+      graceWedge.material.uniforms.redTint.value = Math.max(0.0, colorIntensity);
+    } else {
+      crescentMat.uniforms.redTint.value = 0.0;
+      graceWedge.material.uniforms.redTint.value = 0.0;
+    }
+    
+    if (!graceShudder.active) return;
+    
+    graceShudder.time += dt;
+    if (graceShudder.time >= graceShudder.duration) {
+      graceShudder.active = false;
+      graceGroup.rotation.z = -angles.grace;
+      graceGroup.position.x = 0;
+      graceGroup.position.y = 0;
+      return;
+    }
+    
+    var t = graceShudder.time / graceShudder.duration;
+    var shake = Math.sin(t * Math.PI * 8.0) * (1.0 - t) * 0.04;
+    graceGroup.rotation.z = -angles.grace + shake;
+    graceGroup.position.x = (Math.random() - 0.5) * (1.0 - t) * 0.08;
+    graceGroup.position.y = (Math.random() - 0.5) * (1.0 - t) * 0.08;
+  }
+
   function applyBindingGlow(mesh, colorHex, active) {
     if (!mesh || !mesh.material) return;
     mesh.material.color.setHex(colorHex);
@@ -1819,6 +1878,7 @@
         bdx /= blen;
         bdy /= blen;
         triggerImpactBurst(impactX, impactY, bdx, bdy);
+        triggerGraceShudder();
 
         meteorsImpact += 1;
         valImpacts.textContent = meteorsImpact;
@@ -1923,6 +1983,7 @@
     }
 
     updateImpactBursts(dt);
+    updateGraceShudder(dt);
 
     applyBindingGlow(ringLine, isRingDriven ? 0x00b7ff : (isRingFixed ? 0xffb020 : 0xffffff), true);
     applyBindingGlow(carrierOrbit, isSunDriven ? 0x00b7ff : (isSunFixed ? 0xffb020 : 0xffffff), true);
